@@ -38,7 +38,7 @@ This work can be extended easily to support other tasks, such as the Travelling 
 
 I trained a model on `sort10` for 4 epochs of 1,000,000 randomly generated samples. I tested it on a dataset of size 10,000. Then, I tested the same model on `sort15` and `sort20` to test the generalization capabilities.
 
-Test results on 10,000 samples: 
+Test results on 10,000 samples (A reward of 1.0 means the network perfectly sorted the input): 
 
 | task | average reward | variance | 
 |---|---|---|
