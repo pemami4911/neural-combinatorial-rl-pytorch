@@ -28,11 +28,11 @@ This work can be extended easily to support other tasks, such as the Travelling 
 
 ## Dependencies
 
-    * Python=3.6 (should be OK with v >= 3.4)
-    * PyTorch=0.1.12_2
-    * tqdm
-    * matplotlib
-    * [tensorboard_logger](https://github.com/TeamHG-Memex/tensorboard_logger)
+* Python=3.6 (should be OK with v >= 3.4)
+* PyTorch=0.1.12_2
+* tqdm
+* matplotlib
+* [tensorboard_logger](https://github.com/TeamHG-Memex/tensorboard_logger)
 
 ## Results
 
@@ -62,29 +62,35 @@ Examples:
 
 `sort10`: 
 
-[sort10-0](img/sort10-0.png)
+![sort10-0](/img/sort10-0.png)
 
-[sort10-1](img/sort10-1.png)
+![sort10-1](/img/sort10-1.png)
+
+During greedy decoding, after making a selection, the logits for that index for the input is set to 0 for the rest of the decoding process.
 
 `sort15`:
 
-[sort15-0](img/sort15-0.png)
-[sort15-1](img/sort15-1.png)
+![sort15-0](img/sort15-0.png)
+
+![sort15-1](img/sort15-1.png)
 
 `sort20`:
 
-[sort20-0](img/sort20-0.png)
-[sort20-1](img/sort20-1.png)
+![sort20-0](img/sort20-0.png)
+
+Zoomed in slightly. Notice how the network doesn't really know how to handle higher numbers it wasn't trained on! But, it understands that they belong closer to the end of the output sequence.
+
+![sort20-1](img/sort20-1.png)
 
 ## TODO
 
-[ ] Add RL pretraiing-Sampling
-[ ] Add RL pretraining-Active Search
-[ ] Active Search
-[ ] Asynchronous training a la A3C
-[ ] Refactor `USE_CUDA` variable
+* [ ] Add RL pretraiing-Sampling
+* [ ] Add RL pretraining-Active Search
+* [ ] Active Search
+* [ ] Asynchronous training a la A3C
+* [ ] Refactor `USE_CUDA` variable
 
 ## Acknowledgements
 
-Special thanks to the repos [devsisters/neural-combinatorial-rl-tensorflow](https://github.com/devsisters/neural-combinatorial-rl-tensorflow) and [MaximumEntropy/Seq2Seq-PyTorch](://github.com/MaximumEntropy/Seq2Seq-PyTorch) for getting me started. 
+Special thanks to the repos [devsisters/neural-combinatorial-rl-tensorflow](https://github.com/devsisters/neural-combinatorial-rl-tensorflow) and [MaximumEntropy/Seq2Seq-PyTorch](https://github.com/MaximumEntropy/Seq2Seq-PyTorch) for getting me started. 
 
