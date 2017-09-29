@@ -35,11 +35,11 @@ def reward(sample_solution, USE_CUDA=False):
     batch_size = sample_solution[0].size(0)
     sourceL = len(sample_solution)
 
-    longest = Variable(torch.ones(batch_size), requires_grad=False)
+    #longest = Variable(torch.ones(batch_size), requires_grad=False)
     current = Variable(torch.ones(batch_size), requires_grad=False)
 
     if USE_CUDA:
-        longest = longest.cuda()
+        #longest = longest.cuda()
         current = current.cuda()
 
     for i in range(1, sourceL):
@@ -48,11 +48,14 @@ def reward(sample_solution, USE_CUDA=False):
         # if res[i,j] == 1, increment length of current sorted subsequence
         current += res.float()  
         # else, reset current to 1
+        # penalty
         current[torch.eq(res, 0)] = 1
+        #current[torch.eq(res, 0)] -= 1
         # if, for any, current > longest, update longest
-        mask = torch.gt(current, longest)
-        longest[mask] = current[mask]
-    return torch.div(longest, sourceL)
+        #mask = torch.gt(current, longest)
+        #longest[mask] = current[mask]
+    #return torch.div(longest, sourceL)
+    return torch.div(current, sourceL)
 
 def create_dataset(
         train_size,
