@@ -200,6 +200,7 @@ class Decoder(nn.Module):
                     outputs.append(outs[:, 0,:])
                 else:
                     outputs.append(outs.squeeze(0))
+                # Check for indexing
                 selections.append(idxs)
                  # Should be done decoding
                 if len(active) == 0:
@@ -223,13 +224,8 @@ class Decoder(nn.Module):
             selected for this iteration of the decoding
         """
         batch_size = logits.size(0)
-        #batch_idxs = torch.arange(0, batch_size).long()
-        #if USE_CUDA:
-        #    batch_idxs = batch_idxs.cuda()
-
         logits_ = logits.clone()
-        # Set the logits in prev to 0
-        #for p in prev:
+        
         if logit_mask is None:
             logit_mask = torch.zeros(logits.size()).byte()
             if USE_CUDA:
@@ -238,9 +234,12 @@ class Decoder(nn.Module):
         # to prevent them from being reselected. 
         # Or, allow re-selection and penalize in the objective function
         if prev is not None:
+            #import pdb; pdb.set_trace()
             logit_mask[[x for x in range(batch_size)],
                     prev.data] = 1
             logits_[logit_mask] = 0
+            # renormalize
+            logits_ /= logits_.sum()
         
         # idxs is [batch_size]
         idxs = logits_.multinomial().squeeze(1)
@@ -260,6 +259,7 @@ class Decoder(nn.Module):
         if prev is not None:
             logit_mask[0,:,prev.data[0]] = 1
             logits_[logit_mask] = 0
+            logits_ /= logits_.sum()
 
         active = []
         for b in range(batch_size):
@@ -488,10 +488,13 @@ class NeuralCombOptRL(nn.Module):
         # Select the actions (inputs pointed to 
         # by the pointer net) and the corresponding
         # logits
+        # should be size [batch_size x 
         actions = []
-
+        # inputs is [batch_size, input_dim, sourceL]
+        inputs_ = inputs.transpose(1, 2)
+        # inputs_ is [batch_size, sourceL, input_dim]
         for action_id in action_idxs:
-            actions.append(inputs[..., action_id.data[0]])
+            actions.append(inputs_[[x for x in range(batch_size)], action_id.data, :])
 
         if self.is_train:
             # logits_ is a list of len sourceL of [batch_size x sourceL]

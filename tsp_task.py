@@ -37,7 +37,7 @@ def reward(sample_solution, USE_CUDA=False):
     
     tour_len += torch.norm(sample_solution[n-1] - sample_solution[0], dim=1)
 
-    return tour_len
+    return -tour_len
 
 #######################################
 # Functions for downloading dataset
@@ -166,37 +166,65 @@ def create_dataset(
     problem_size, 
     data_dir):
 
-    train_fname = os.path.join(data_dir, 'tsp{}.txt'.format(problem_size))
-    val_fname = os.path.join(data_dir, 'tsp{}_test.txt'.format(problem_size))
+    def find_or_return_empty(data_dir, problem_size):
+        #train_fname1 = os.path.join(data_dir, 'tsp{}.txt'.format(problem_size))
+        val_fname1 = os.path.join(data_dir, 'tsp{}_test.txt'.format(problem_size))
+        #train_fname2 = os.path.join(data_dir, 'tsp-{}.txt'.format(problem_size))
+        val_fname2 = os.path.join(data_dir, 'tsp-{}_test.txt'.format(problem_size))
+        
+        if not os.path.isdir(data_dir):
+            os.mkdir(data_dir)
+        else:
+    #         if os.path.exists(train_fname1) and os.path.exists(val_fname1):
+    #             return train_fname1, val_fname1
+    #         if os.path.exists(train_fname2) and os.path.exists(val_fname2):
+    #             return train_fname2, val_fname2
+    #     return None, None
 
-    if not os.path.isdir(data_dir):
-        os.mkdir(data_dir)
-    else:
-        if os.path.exists(train_fname) and os.path.exists(val_fname):
-            return train_fname, val_fname
+    # train, val = find_or_return_empty(data_dir, problem_size)
+    # if train is None and val is None:
+    #     download_google_drive_file(data_dir,
+    #         'tsp', '', problem_size) 
+    #     train, val = find_or_return_empty(data_dir, problem_size)
 
-    download_google_drive_file(data_dir,
-        'tsp', '', problem_size) 
-   
-    return train_fname, val_fname
+    # return train, val
+            if os.path.exists(val_fname1):
+                return val_fname1
+            if os.path.exists(val_fname2):
+                return val_fname2
+        return None
+
+    val = find_or_return_empty(data_dir, problem_size)
+    if val is None:
+        download_google_drive_file(data_dir, 'tsp', '', problem_size)
+        val = find_or_return_empty(data_dir, problem_size)
+
+    return val
+
 
 #######################################
 # Dataset
 #######################################
 class TSPDataset(Dataset):
     
-    def __init__(self, dataset_fname):
+    def __init__(self, dataset_fname=None, train=False, size=50, num_samples=1000000):
         super(TSPDataset, self).__init__()
 
         self.data_set = []
-        with open(dataset_fname, 'r') as dset:
-            for l in tqdm(dset):
-                inputs, outputs = l.split(' output ')
-                sample = torch.zeros(1, )
-                x = np.array(inputs.split(), dtype=np.float32).reshape([-1, 2]).T
-                #y.append(np.array(outputs.split(), dtype=np.int32)[:-1]) # skip the last one
+        if not train:
+            with open(dataset_fname, 'r') as dset:
+                for l in tqdm(dset):
+                    inputs, outputs = l.split(' output ')
+                    sample = torch.zeros(1, )
+                    x = np.array(inputs.split(), dtype=np.float32).reshape([-1, 2]).T
+                    #y.append(np.array(outputs.split(), dtype=np.int32)[:-1]) # skip the last one
+                    self.data_set.append(x)
+        else:
+            # randomly sample points uniformly from [0, 1]
+            for l in tqdm(range(num_samples)):
+                x = torch.FloatTensor(2, size).uniform_(0, 1)
                 self.data_set.append(x)
-        
+
         self.size = len(self.data_set)
 
     def __len__(self):
@@ -206,4 +234,4 @@ class TSPDataset(Dataset):
         return self.data_set[idx]
     
 if __name__ == '__main__':
-    paths = download_google_drive_file('data', 'tsp', '', '5')
+    paths = download_google_drive_file('data/tsp', 'tsp', '', '50')

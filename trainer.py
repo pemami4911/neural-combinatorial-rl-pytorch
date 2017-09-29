@@ -29,7 +29,6 @@ parser.add_argument('--task', default='sort_10', help="The task to solve, in the
 parser.add_argument('--batch_size', default=128, help='')
 parser.add_argument('--train_size', default=1000000, help='')
 parser.add_argument('--val_size', default=10000, help='')
-parser.add_argument('--test_size', default=10000, help='')
 # Network
 parser.add_argument('--embedding_dim', default=128, help='Dimension of input embedding')
 parser.add_argument('--hidden_dim', default=128, help='Dimension of hidden layers in Enc/Dec')
@@ -41,8 +40,8 @@ parser.add_argument('--dropout', default=0., help='')
 parser.add_argument('--terminating_symbol', default='<0>', help='')
 parser.add_argument('--beam_size', default=1, help='Beam width for beam search')
 # Training
-parser.add_argument('--actor_net_lr', default=1e-4, help="Set the learning rate for the actor network")
-parser.add_argument('--critic_net_lr', default=1e-4, help="Set the learning rate for the critic network")
+parser.add_argument('--actor_net_lr', default=1e-3, help="Set the learning rate for the actor network")
+parser.add_argument('--critic_net_lr', default=1e-3, help="Set the learning rate for the critic network")
 parser.add_argument('--actor_lr_decay_step', default=5000, help='')
 parser.add_argument('--critic_lr_decay_step', default=5000, help='')
 parser.add_argument('--actor_lr_decay_rate', default=0.96, help='')
@@ -99,11 +98,12 @@ elif COP == 'tsp':
 
     input_dim = 2
     reward_fn = tsp_task.reward
-    train_fname, val_fname = tsp_task.create_dataset(
+    val_fname = tsp_task.create_dataset(
         problem_size=str(size),
         data_dir=data_dir)
-    training_dataset = tsp_task.TSPDataset(train_fname)
-    val_dataset = tsp_task.TSPDataset(val_fname)
+    training_dataset = tsp_task.TSPDataset(train=True, size=size,
+         num_samples=int(args['train_size']))
+    val_dataset = tsp_task.TSPDataset(dataset_fname=val_fname)
 else:
     print('Currently unsupported task!')
     exit(1)
@@ -224,7 +224,10 @@ for i in range(int(args['n_epochs'])):
                 example_output = []
                 example_input = []
                 for idx, action in enumerate(actions):
-                    example_output.append(action[0].data[0])  # <-- ?? 
+                    if task[0] == 'tsp':
+                        example_output.append(actions_idxs[idx][0].data[0])
+                    else:
+                        example_output.append(action[0].data[0])  # <-- ?? 
                     example_input.append(sample_batch[0, :, idx][0])
                 print('Example train input: {}'.format(example_input))
                 print('Example train output: {}'.format(example_output))
@@ -291,3 +294,7 @@ for i in range(int(args['n_epochs'])):
      
         torch.save(model, os.path.join(save_dir, 'epoch-{}.pt'.format(i)))
 
+        print('Generating and loading new training set')
+
+        training_dataset = tsp_task.TSPDataset(train=True, size=size,
+             num_samples=int(args['train_size']))
