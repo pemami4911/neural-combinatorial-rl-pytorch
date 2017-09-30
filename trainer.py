@@ -40,8 +40,8 @@ parser.add_argument('--dropout', default=0., help='')
 parser.add_argument('--terminating_symbol', default='<0>', help='')
 parser.add_argument('--beam_size', default=1, help='Beam width for beam search')
 # Training
-parser.add_argument('--actor_net_lr', default=1e-3, help="Set the learning rate for the actor network")
-parser.add_argument('--critic_net_lr', default=1e-3, help="Set the learning rate for the critic network")
+parser.add_argument('--actor_net_lr', default=1e-4, help="Set the learning rate for the actor network")
+parser.add_argument('--critic_net_lr', default=1e-4, help="Set the learning rate for the critic network")
 parser.add_argument('--actor_lr_decay_step', default=5000, help='')
 parser.add_argument('--critic_lr_decay_step', default=5000, help='')
 parser.add_argument('--actor_lr_decay_rate', default=0.96, help='')
@@ -170,6 +170,9 @@ if not args['is_train']:
 for i in range(int(args['n_epochs'])):
     
     if args['is_train']:
+        # put in train mode!
+        model.train()
+
         # sample_batch is [batch_size x input_dim x sourceL]
         for batch_id, sample_batch in enumerate(tqdm(training_dataloader,
                 disable=args['disable_progress_bar'])):
@@ -253,6 +256,9 @@ for i in range(int(args['n_epochs'])):
     example_output = []
     avg_reward = []
 
+    # put in test mode!
+    model.eval()
+
     for batch_id, val_batch in enumerate(tqdm(validation_dataloader,
             disable=args['disable_progress_bar'])):
         bat = Variable(val_batch)
@@ -294,7 +300,7 @@ for i in range(int(args['n_epochs'])):
      
         torch.save(model, os.path.join(save_dir, 'epoch-{}.pt'.format(i)))
 
-        print('Generating and loading new training set')
-
-        training_dataset = tsp_task.TSPDataset(train=True, size=size,
-             num_samples=int(args['train_size']))
+        if task == 'tsp':
+            print('Generating and loading new TSP training set')
+            training_dataset = tsp_task.TSPDataset(train=True, size=size,
+                num_samples=int(args['train_size']))

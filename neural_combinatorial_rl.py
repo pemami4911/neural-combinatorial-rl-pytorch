@@ -11,6 +11,8 @@ USE_CUDA = True
 
 
 class Encoder(nn.Module):
+    """Maps a graph represented as an input sequence
+    to a hidden vector"""
     def __init__(self, input_dim, hidden_dim, n_layers, dropout):
         super(Encoder, self).__init__()
         self.hidden_dim = hidden_dim
@@ -38,6 +40,7 @@ class Encoder(nn.Module):
             return hx, cx
 
 class Attention(nn.Module):
+    """A generic attention module for a decoder in seq2seq"""
     def __init__(self, dim, use_tanh=False, C=10):
         super(Attention, self).__init__()
         self.use_tanh = use_tanh
@@ -57,8 +60,9 @@ class Attention(nn.Module):
         """
         Args: 
             query: is the hidden state of the decoder at the current
-            time step. batch x dim
-            ref: the set of hidden states from the encoder. sourceL x batch x hidden_dim
+                time step. batch x dim
+            ref: the set of hidden states from the encoder. 
+                sourceL x batch x hidden_dim
         """
         # ref is now [batch_size x hidden_dim x sourceL]
         ref = ref.permute(1, 2, 0)
@@ -114,7 +118,7 @@ class Decoder(nn.Module):
         Args:
             decoder_input: The initial input to the decoder
                 size is [batch_size x embedding_dim]. Trainable parameter.
-            embedded inputs: [sourceL x batch_size x embeddign_dim]
+            embedded_inputs: [sourceL x batch_size x embeddign_dim]
             hidden: the prev hidden state, size is [batch_size x hidden_dim]. 
                 Initially this is set to (enc_h[-1], enc_c[-1])
             context: encoder outputs, [sourceL x batch_size x hidden_dim] 
@@ -186,9 +190,6 @@ class Decoder(nn.Module):
                 outs = outs.view(self.beam_size, batch_size, -1
                         ).transpose(0, 1).contiguous()
                 
-                # if i < steps[-1]:
-                #     n_best = self.beam_size
-                # else:
                 n_best = 1
                 # select the next inputs for the decoder [batch_size x hidden_dim]
                 decoder_input, idxs, active, mask = self.decode_beam(outs,
@@ -218,10 +219,11 @@ class Decoder(nn.Module):
             logits: [batch_size x sourceL]
             embedded_inputs: [sourceL x batch_size x embedding_dim]
             prev: list of Tensors containing previously selected indices
-        Returns:
+            logit_mask: bit mask for zero'ing out previously selected logits
+       Returns:
             Tensor of size [batch_size x sourceL] containing the embeddings
             from the inputs corresponding to the [batch_size] indices
-            selected for this iteration of the decoding
+            selected for this iteration of the decoding, as well as the mask
         """
         batch_size = logits.size(0)
         logits_ = logits.clone()
@@ -303,6 +305,8 @@ class Decoder(nn.Module):
         return x.view(idxs.size(0) * n_best, embedded_inputs.size(2)), idxs, active, logit_mask
 
 class PointerNetwork(nn.Module):
+    """The pointer network, which is the core seq2seq 
+    model"""
     def __init__(self, 
             embedding_dim,
             hidden_dim,
@@ -360,6 +364,7 @@ class PointerNetwork(nn.Module):
         
 
 class CriticNetwork(nn.Module):
+    """Useful as a baseline in REINFORCE updates"""
     def __init__(self,
             embedding_dim,
             hidden_dim,
@@ -404,7 +409,7 @@ class NeuralCombOptRL(nn.Module):
     """
     This module contains the PointerNetwork (actor) and
     CriticNetwork (critic). It requires
-    an application-specific objective function
+    an application-specific reward function
     """
     def __init__(self, 
             input_dim,
