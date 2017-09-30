@@ -4,7 +4,7 @@
 import torch
 from torch.utils.data import Dataset
 from torch.autograd import Variable
-from tqdm import trange
+from tqdm import trange, tqdm
 import os
 import sys
 
@@ -49,6 +49,7 @@ def reward(sample_solution, USE_CUDA=False):
         current += res.float()  
         # else, reset current to 1
         current[torch.eq(res, 0)] = 1
+        #current[torch.eq(res, 0)] -= 1
         # if, for any, current > longest, update longest
         mask = torch.gt(current, longest)
         longest[mask] = current[mask]
@@ -128,7 +129,7 @@ class SortingDataset(Dataset):
         self.data_set = []
         with open(dataset_fname, 'r') as dset:
             lines = dset.readlines()
-            for next_line in lines:
+            for next_line in tqdm(lines):
                 toks = next_line.split()
                 sample = torch.zeros(1, len(toks)).long()
                 for idx, tok in enumerate(toks):

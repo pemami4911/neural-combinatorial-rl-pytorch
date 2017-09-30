@@ -4,32 +4,36 @@ PyTorch implementation of [Neural Combinatorial Optimization with Reinforcement 
 
 So far, I have implemented the basic RL pretraining model from the paper. An implementation of the supervised learning baseline model is available [here](https://github.com/pemami4911/neural-combinatorial-rl-tensorflow). 
 
-My implementation uses a stochastic decoding policy in the pointer network, realized via PyTorch's `torch.multinomial()`, during training, and a greedy policy for decoding when testing the model. Other modifications I made include using dropout in the encoder of the pointer network and the critic network. A dropout value of `0.1` significantly improved the results. Otherwise, I used the same hyperparameters as mentioned in the paper. 
+My implementation uses a stochastic decoding policy in the pointer network, realized via PyTorch's `torch.multinomial()`, during training, and beam search for decoding when testing the model. Other modifications I made include using dropout in the encoder of the pointer network and the critic network. A dropout value of `0.1` significantly improved the results. Otherwise, I used the same hyperparameters as mentioned in the paper. 
 
-Currently, this implementation only supports a simple sorting task. You can train the model on any sorting task from `sort10` to `sort99` (sequences of length 10 and 99, respectively).
+Currently, there is support for a sorting task and the Planar Symmetric Euclidean TSP.
 
-To run `sort10`:
+To run `sort_10`:
     
-    ./trainer.py --dropout 0.1 --random_seed 1234 --run_name sort10-dropout-0.1-seed-1234
+    ./trainer.py --task sort_10 --beam_size 3 --dropout 0.1 --random_seed 1234 --run_name sort_10-dropout-0.1-seed-1234
 
-To load a saved model trained on `sort10` and test on `sort15`:
+To run `tsp_50`:
 
-    ./trainer.py --task sort15 --max_decoder_len 15 --load_path outputs/sort10/24601-dropout-0.1/epoch-3.pt --run_name 24601-sort15-epoch-3 --is_train False
+    ./trainer.py --task tsp_50 --beam_size 10 --dropout 0.3 --random_seed 1234 --run_name tsp_50-dropout-0.3-seed-1234 
+
+To load a saved model trained on `sort_10` and test on `sort_15`:
+
+    ./trainer.py --task --beam_size 3 sort_15 --max_decoder_len 15 --load_path outputs/sort_10/24601-dropout-0.1/epoch-3.pt --run_name 24601-sort15-epoch-3 --is_train False
 
 To load a saved model and view the pointer network's attention layer:
 
-    ./trainer.py --task sort15 --max_decoder_len 15 --load_path outputs/sort10/24601-dropout-0.1/epoch-3.pt --run_name 24601-sort15-attend --is_train False --disable_tensorboard True --plot_attention True
+    ./trainer.py --task sort_15 --beam_size 3 --max_decoder_len 15 --load_path outputs/sort_10/24601-dropout-0.1/epoch-3.pt --run_name 24601-sort_15-attend --is_train False --disable_tensorboard True --plot_attention True
 
 Please, feel free to notify me if you encounter any errors, or if you'd like to submit a pull request to add more features to this implementation.
 
 ## Adding other tasks
 
-This work can be extended easily to support other tasks, such as the Travelling Salesman Problem. See the `sorting_task.py` module for a reference. The key thing is to provide a reward function that takes in a sample solution, selected by the pointer network from the input, and returns a scalar reward. For the sorting task, the agent received a reward proportional to the length of the longest strictly increasing subsequence in the decoded output (e.g., `[1, 3, 5, 2, 4] -> 3/5 = 0.6`).
+This implementation can be extended to support other combinatorial optimization problems. See `sorting_task.py` and `tsp_task.py` for examples on how to add. The key thing is to provide a dataset class and a reward function that takes in a sample solution, selected by the pointer network from the input, and returns a scalar reward. For the sorting task, the agent received a reward proportional to the length of the longest strictly increasing subsequence in the decoded output (e.g., `[1, 3, 5, 2, 4] -> 3/5 = 0.6`).
 
 ## Dependencies
 
 * Python=3.6 (should be OK with v >= 3.4)
-* PyTorch=0.1.12_2
+* PyTorch=0.2
 * tqdm
 * matplotlib
 * [tensorboard_logger](https://github.com/TeamHG-Memex/tensorboard_logger)

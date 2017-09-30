@@ -8,6 +8,7 @@ import pprint as pp
 import numpy as np
 
 import torch
+print(torch.__version__)
 import torch.optim as optim
 import torch.autograd as autograd
 from torch.autograd import Variable
@@ -24,21 +25,20 @@ def str2bool(v):
 parser = argparse.ArgumentParser(description="Neural Combinatorial Optimization with RL")
 
 # Data
-parser.add_argument('--task', default='sort10', help="Select the task to solve")
+parser.add_argument('--task', default='sort_10', help="The task to solve, in the form {COP}_{size}, e.g., tsp_20")
 parser.add_argument('--batch_size', default=128, help='')
 parser.add_argument('--train_size', default=1000000, help='')
 parser.add_argument('--val_size', default=10000, help='')
-parser.add_argument('--test_size', default=10000, help='')
 # Network
 parser.add_argument('--embedding_dim', default=128, help='Dimension of input embedding')
 parser.add_argument('--hidden_dim', default=128, help='Dimension of hidden layers in Enc/Dec')
 parser.add_argument('--n_process_blocks', default=3, help='Number of process block iters to run in the Critic network')
 parser.add_argument('--n_layers', default=1, help='Number of LSTM layers in the encoder')
-parser.add_argument('--max_decoder_len', default=10, help='Max number of time steps the decoder runs before stopping')
 parser.add_argument('--n_glimpses', default=1, help='No. of glimpses to use in the pointer network')
 parser.add_argument('--tanh_exploration', default=10, help='Hyperparam controlling exploration in the pointer net by scaling the tanh in the softmax')
 parser.add_argument('--dropout', default=0., help='')
 parser.add_argument('--terminating_symbol', default='<0>', help='')
+parser.add_argument('--beam_size', default=1, help='Beam width for beam search')
 # Training
 parser.add_argument('--actor_net_lr', default=1e-4, help="Set the learning rate for the actor network")
 parser.add_argument('--critic_net_lr', default=1e-4, help="Set the learning rate for the critic network")
@@ -55,11 +55,11 @@ parser.add_argument('--use_cuda', type=str2bool, default=True, help='')
 parser.add_argument('--log_step', default=50, help='Log info every log_step steps')
 parser.add_argument('--log_dir', type=str, default='logs')
 parser.add_argument('--run_name', type=str, default='0')
-parser.add_argument('--data_dir', type=str, default='data')
 parser.add_argument('--output_dir', type=str, default='outputs')
 parser.add_argument('--load_path', type=str, default='')
 parser.add_argument('--disable_tensorboard', type=str2bool, default=False)
 parser.add_argument('--plot_attention', type=str2bool, default=False)
+parser.add_argument('--disable_progress_bar', type=str2bool, default=False)
 
 args = vars(parser.parse_args())
 
@@ -76,23 +76,34 @@ if not args['disable_tensorboard']:
     configure(os.path.join(args['log_dir'], args['task'], args['run_name']))
 
 # Task specific configuration - generate dataset if needed
-task = args['task'][:4]
+task = args['task'].split('_')
+COP = task[0]
+size = int(task[1])
+data_dir = 'data/' + COP
 
-if task == 'sort':
+if COP == 'sort':
     import sorting_task
-
-    #data_len = 10 if args['task'] == 'sort10' else 12
-    data_len = int(args['task'][-2:])
-
-    input_size = 1
+    
+    input_dim = 1
     reward_fn = sorting_task.reward
     train_fname, val_fname = sorting_task.create_dataset(
         int(args['train_size']),
         int(args['val_size']),
-        args['data_dir'],
-        data_len=data_len)
+        data_dir,
+        data_len=size)
     training_dataset = sorting_task.SortingDataset(train_fname)
     val_dataset = sorting_task.SortingDataset(val_fname)
+elif COP == 'tsp':
+    import tsp_task
+
+    input_dim = 2
+    reward_fn = tsp_task.reward
+    val_fname = tsp_task.create_dataset(
+        problem_size=str(size),
+        data_dir=data_dir)
+    training_dataset = tsp_task.TSPDataset(train=True, size=size,
+         num_samples=int(args['train_size']))
+    val_dataset = tsp_task.TSPDataset(dataset_fname=val_fname)
 else:
     print('Currently unsupported task!')
     exit(1)
@@ -104,21 +115,22 @@ if args['load_path'] != '':
             os.getcwd(),
             args['load_path']
         ))
-    model.actor_net.decoder.max_length = int(args['max_decoder_len'])
+    model.actor_net.decoder.max_length = size
     model.is_train = args['is_train']
 else:
     # Instantiate the Neural Combinatorial Opt with RL module
     model = NeuralCombOptRL(
-        input_size,
+        input_dim,
         int(args['embedding_dim']),
         int(args['hidden_dim']),
-        int(args['max_decoder_len']),
+        size, # decoder len
         args['terminating_symbol'],
         int(args['n_glimpses']),
         int(args['n_process_blocks']), 
         int(args['n_layers']), 
         float(args['tanh_exploration']),
         float(args['dropout']),
+        int(args['beam_size']),
         reward_fn,
         args['is_train'])
 
@@ -152,11 +164,18 @@ step = 0
 if not args['is_train']:
     args['n_epochs'] = '1'
 
+
+#model.actor_net.decoder.decode_type = "beam_search"
+
 for i in range(int(args['n_epochs'])):
     
     if args['is_train']:
+        # put in train mode!
+        model.train()
+
         # sample_batch is [batch_size x input_dim x sourceL]
-        for batch_id, sample_batch in enumerate(tqdm(training_dataloader)):
+        for batch_id, sample_batch in enumerate(tqdm(training_dataloader,
+                disable=args['disable_progress_bar'])):
             
             bat = Variable(sample_batch)
             if USE_CUDA:
@@ -164,11 +183,11 @@ for i in range(int(args['n_epochs'])):
 
             R, v, probs, actions, actions_idxs = model(bat)
         
-            advantage = R - v
+            advantage = R - v[0]
         
             logprobs = 0
             for prob in probs: 
-            # compute the sum of the log probs
+                # compute the sum of the log probs
                 logprobs += torch.log(prob)
 
             # multiply each time step by the advanrate
@@ -177,9 +196,7 @@ for i in range(int(args['n_epochs'])):
             actor_loss = reinforce.mean()
             actor_optim.zero_grad()
             
-            #autograd.backward(actions, [None for _ in actions],
-            #        retain_variables=True)
-            actor_loss.backward(retain_variables=True)
+            actor_loss.backward(retain_graph=True)
             
             # clip gradient norms
             torch.nn.utils.clip_grad_norm(model.actor_net.parameters(),
@@ -210,7 +227,10 @@ for i in range(int(args['n_epochs'])):
                 example_output = []
                 example_input = []
                 for idx, action in enumerate(actions):
-                    example_output.append(action.data[0])  # <-- ?? 
+                    if task[0] == 'tsp':
+                        example_output.append(actions_idxs[idx][0].data[0])
+                    else:
+                        example_output.append(action[0].data[0])  # <-- ?? 
                     example_input.append(sample_batch[0, :, idx][0])
                 print('Example train input: {}'.format(example_input))
                 print('Example train output: {}'.format(example_output))
@@ -226,17 +246,21 @@ for i in range(int(args['n_epochs'])):
                 critic_optim = optim.Adam(model.critic_net.parameters(),
                         lr=float(args['critic_net_lr']))
 
-    # Use greedy decoding for validation
-    model.actor_net.decoder.decode_type = "Greedy"
+    # Use beam search decoding for validation
+    model.actor_net.decoder.decode_type = "beam_search"
     
-    print('\n~Validating with greedy decoding~\n')
+    print('\n~Validating with beam search decoding~\n')
 
     count = 0
     example_input = []
     example_output = []
     avg_reward = []
 
-    for batch_id, val_batch in enumerate(tqdm(validation_dataloader)):
+    # put in test mode!
+    model.eval()
+
+    for batch_id, val_batch in enumerate(tqdm(validation_dataloader,
+            disable=args['disable_progress_bar'])):
         bat = Variable(val_batch)
 
         if USE_CUDA:
@@ -270,9 +294,13 @@ for i in range(int(args['n_epochs'])):
     print('Validation overall reward var: {}'.format(np.var(avg_reward)))
      
     if args['is_train']:
-        model.actor_net.decoder.decode_type = "Stochastic"
+        model.actor_net.decoder.decode_type = "stochastic"
          
         print('Saving model...')
      
         torch.save(model, os.path.join(save_dir, 'epoch-{}.pt'.format(i)))
 
+        if task == 'tsp':
+            print('Generating and loading new TSP training set')
+            training_dataset = tsp_task.TSPDataset(train=True, size=size,
+                num_samples=int(args['train_size']))
