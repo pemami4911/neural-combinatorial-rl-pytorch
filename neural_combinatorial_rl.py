@@ -4,6 +4,7 @@ import torch.autograd as autograd
 from torch.autograd import Variable
 import torch.nn.functional as F
 import math
+import numpy as np
 
 from beam_search import Beam
 
@@ -94,6 +95,7 @@ class Decoder(nn.Module):
             tanh_exploration,
             terminating_symbol,
             decode_type,
+            dropout,
             n_glimpses=1,
             beam_size=0):
         super(Decoder, self).__init__()
@@ -106,6 +108,7 @@ class Decoder(nn.Module):
         self.decode_type = decode_type
         self.beam_size = beam_size
 
+        self.dropout = nn.Dropout(p=dropout)
         self.input_weights = nn.Linear(embedding_dim, 4 * hidden_dim)
         self.hidden_weights = nn.Linear(hidden_dim, 4 * hidden_dim)
         self.linear_hidden_out = nn.Linear(hidden_dim * 2, hidden_dim)
@@ -124,6 +127,9 @@ class Decoder(nn.Module):
             context: encoder outputs, [sourceL x batch_size x hidden_dim] 
         """
         def recurrence(x, hidden):
+            
+            x = self.dropout(x)
+
             hx, cx = hidden  # batch_size x hidden_dim
             
             gates = self.input_weights(x) + self.hidden_weights(hx)
@@ -236,7 +242,6 @@ class Decoder(nn.Module):
         # to prevent them from being reselected. 
         # Or, allow re-selection and penalize in the objective function
         if prev is not None:
-            #import pdb; pdb.set_trace()
             logit_mask[[x for x in range(batch_size)],
                     prev.data] = 1
             logits_[logit_mask] = 0
@@ -332,6 +337,7 @@ class PointerNetwork(nn.Module):
                 tanh_exploration=tanh_exploration,
                 terminating_symbol=terminating_symbol,
                 decode_type="stochastic",
+                dropout=dropout,
                 n_glimpses=n_glimpses,
                 beam_size=beam_size)
         
@@ -454,9 +460,10 @@ class NeuralCombOptRL(nn.Module):
 
         self.embedding = nn.Parameter(embedding_)
          
-        self.embedding.data.uniform_(-(1. / math.sqrt(embedding_dim)),
-            1. / math.sqrt(embedding_dim))
-
+        #self.embedding.data.uniform_(-(1. / math.sqrt(embedding_dim)),
+        #    1. / math.sqrt(embedding_dim))
+        self.embedding.data.uniform_(-0.08, 0.08)
+        
     def forward(self, inputs):
         """
         Args:

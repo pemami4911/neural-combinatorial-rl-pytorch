@@ -37,7 +37,7 @@ def reward(sample_solution, USE_CUDA=False):
     
     tour_len += torch.norm(sample_solution[n-1] - sample_solution[0], dim=1)
 
-    return -tour_len
+    return 1./tour_len
 
 #######################################
 # Functions for downloading dataset

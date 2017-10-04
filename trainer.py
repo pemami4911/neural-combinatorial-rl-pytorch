@@ -11,6 +11,7 @@ import torch
 print(torch.__version__)
 import torch.optim as optim
 import torch.autograd as autograd
+import torch.multiprocessing as mp
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from tensorboard_logger import configure, log_value
@@ -34,12 +35,13 @@ parser.add_argument('--embedding_dim', default=128, help='Dimension of input emb
 parser.add_argument('--hidden_dim', default=128, help='Dimension of hidden layers in Enc/Dec')
 parser.add_argument('--n_process_blocks', default=3, help='Number of process block iters to run in the Critic network')
 parser.add_argument('--n_layers', default=1, help='Number of LSTM layers in the encoder')
-parser.add_argument('--n_glimpses', default=1, help='No. of glimpses to use in the pointer network')
+parser.add_argument('--n_glimpses', default=2, help='No. of glimpses to use in the pointer network')
 parser.add_argument('--tanh_exploration', default=10, help='Hyperparam controlling exploration in the pointer net by scaling the tanh in the softmax')
 parser.add_argument('--dropout', default=0., help='')
 parser.add_argument('--terminating_symbol', default='<0>', help='')
 parser.add_argument('--beam_size', default=1, help='Beam width for beam search')
 # Training
+parser.add_argument('--n_processes', default=1, help='Use multiprocessing')
 parser.add_argument('--actor_net_lr', default=1e-4, help="Set the learning rate for the actor network")
 parser.add_argument('--critic_net_lr', default=1e-4, help="Set the learning rate for the critic network")
 parser.add_argument('--actor_lr_decay_step', default=5000, help='')
@@ -56,6 +58,7 @@ parser.add_argument('--log_step', default=50, help='Log info every log_step step
 parser.add_argument('--log_dir', type=str, default='logs')
 parser.add_argument('--run_name', type=str, default='0')
 parser.add_argument('--output_dir', type=str, default='outputs')
+parser.add_argument('--epoch_start', type=int, default=0, help='Restart at epoch #')
 parser.add_argument('--load_path', type=str, default='')
 parser.add_argument('--disable_tensorboard', type=str2bool, default=False)
 parser.add_argument('--plot_attention', type=str2bool, default=False)
@@ -103,7 +106,8 @@ elif COP == 'tsp':
         data_dir=data_dir)
     training_dataset = tsp_task.TSPDataset(train=True, size=size,
          num_samples=int(args['train_size']))
-    val_dataset = tsp_task.TSPDataset(dataset_fname=val_fname)
+    val_dataset = tsp_task.TSPDataset(train=True, size=size,
+            num_samples=int(args['val_size']))
 else:
     print('Currently unsupported task!')
     exit(1)
@@ -152,7 +156,7 @@ actor_optim = optim.Adam(model.actor_net.parameters(), lr=float(args['actor_net_
 training_dataloader = DataLoader(training_dataset, batch_size=int(args['batch_size']),
     shuffle=True, num_workers=4)
 
-validation_dataloader = DataLoader(val_dataset, batch_size=1, shuffle=False, num_workers=1)
+validation_dataloader = DataLoader(val_dataset, batch_size=1, shuffle=True, num_workers=1)
 
 
 if args['use_cuda']:
@@ -160,6 +164,7 @@ if args['use_cuda']:
     critic_mse = critic_mse.cuda()
 
 step = 0
+val_step = 0
 
 if not args['is_train']:
     args['n_epochs'] = '1'
@@ -167,7 +172,8 @@ if not args['is_train']:
 
 #model.actor_net.decoder.decode_type = "beam_search"
 
-for i in range(int(args['n_epochs'])):
+epoch = int(args['epoch_start'])
+for i in range(epoch, epoch + int(args['n_epochs'])):
     
     if args['is_train']:
         # put in train mode!
@@ -183,7 +189,7 @@ for i in range(int(args['n_epochs'])):
 
             R, v, probs, actions, actions_idxs = model(bat)
         
-            advantage = R - v[0]
+            advantage = R - v.squeeze(1)
         
             logprobs = 0
             for prob in probs: 
@@ -235,12 +241,14 @@ for i in range(int(args['n_epochs'])):
                 print('Example train input: {}'.format(example_input))
                 print('Example train output: {}'.format(example_output))
 
-            if step % int(args['actor_lr_decay_step']) == 0:
+            if step % int(args['actor_lr_decay_step']) == 0 and \
+                    float(args['actor_net_lr']) > 1e-10:
                 args['actor_net_lr'] = float(args['actor_net_lr']) \
                         * float(args['actor_lr_decay_rate'])
                 actor_optim = optim.Adam(model.actor_net.parameters(),
                         lr=float(args['actor_net_lr']))
-            if step % int(args['critic_lr_decay_step']) == 0:
+            if step % int(args['critic_lr_decay_step']) == 0 and \
+                    float(args['critic_net_lr']) > 1e-10:
                 args['critic_net_lr'] = float(args['critic_net_lr']) \
                         * float(args['critic_lr_decay_rate'])
                 critic_optim = optim.Adam(model.critic_net.parameters(),
@@ -251,7 +259,6 @@ for i in range(int(args['n_epochs'])):
     
     print('\n~Validating with beam search decoding~\n')
 
-    count = 0
     example_input = []
     example_output = []
     avg_reward = []
@@ -269,16 +276,19 @@ for i in range(int(args['n_epochs'])):
         R, v, probs, actions, action_idxs = model(bat)
         
         avg_reward.append(R[0].data[0])
-        count += 1.
+        val_step += 1.
 
         if not args['disable_tensorboard']:
-            log_value('val_avg_reward', R[0].data[0], int(count))
+            log_value('val_avg_reward', R[0].data[0], int(val_step))
 
-        if count % int(args['log_step']) == 0:
+        if val_step % int(args['log_step']) == 0:
             example_output = []
             example_input = []
             for idx, action in enumerate(actions):
-                example_output.append(action[0].data[0])
+                if task[0] == 'tsp':
+                    example_output.append(action_idxs[idx][0].data[0])
+                else:
+                    example_output.append(action[0].data[0])
                 example_input.append(bat[0, :, idx].data[0])
             print('Step: {}'.format(batch_id))
             print('Example test input: {}'.format(example_input))
@@ -300,7 +310,9 @@ for i in range(int(args['n_epochs'])):
      
         torch.save(model, os.path.join(save_dir, 'epoch-{}.pt'.format(i)))
 
-        if task == 'tsp':
+        if COP == 'tsp':
             print('Generating and loading new TSP training set')
             training_dataset = tsp_task.TSPDataset(train=True, size=size,
                 num_samples=int(args['train_size']))
+            training_dataloader = DataLoader(training_dataset, batch_size=int(args['batch_size']),
+                shuffle=True, num_workers=4)
