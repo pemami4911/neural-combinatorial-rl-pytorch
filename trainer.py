@@ -11,12 +11,11 @@ import torch
 print(torch.__version__)
 import torch.optim as optim
 import torch.autograd as autograd
-import torch.multiprocessing as mp
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from tensorboard_logger import configure, log_value
 
-from neural_combinatorial_rl import NeuralCombOptRL, USE_CUDA
+from neural_combinatorial_rl import NeuralCombOptRL
 from plot_attention import plot_attention
 
 
@@ -36,18 +35,20 @@ parser.add_argument('--hidden_dim', default=128, help='Dimension of hidden layer
 parser.add_argument('--n_process_blocks', default=3, help='Number of process block iters to run in the Critic network')
 parser.add_argument('--n_layers', default=1, help='Number of LSTM layers in the encoder')
 parser.add_argument('--n_glimpses', default=2, help='No. of glimpses to use in the pointer network')
-parser.add_argument('--tanh_exploration', default=10, help='Hyperparam controlling exploration in the pointer net by scaling the tanh in the softmax')
+parser.add_argument('--use_tanh', type=str2bool, default=True)
+parser.add_argument('--tanh_exploration', default=20, help='Hyperparam controlling exploration in the pointer net by scaling the tanh in the softmax')
 parser.add_argument('--dropout', default=0., help='')
 parser.add_argument('--terminating_symbol', default='<0>', help='')
 parser.add_argument('--beam_size', default=1, help='Beam width for beam search')
+parser.add_argument('--entropy_coeff', default=0.01, type=float, help='hyperparam for controlling entropy penalty')
 # Training
-parser.add_argument('--n_processes', default=1, help='Use multiprocessing')
 parser.add_argument('--actor_net_lr', default=1e-4, help="Set the learning rate for the actor network")
 parser.add_argument('--critic_net_lr', default=1e-4, help="Set the learning rate for the critic network")
 parser.add_argument('--actor_lr_decay_step', default=5000, help='')
 parser.add_argument('--critic_lr_decay_step', default=5000, help='')
 parser.add_argument('--actor_lr_decay_rate', default=0.96, help='')
 parser.add_argument('--critic_lr_decay_rate', default=0.96, help='')
+parser.add_argument('--reward_scale', default=2, type=float,  help='')
 parser.add_argument('--is_train', type=str2bool, default=True, help='')
 parser.add_argument('--n_epochs', default=1, help='')
 parser.add_argument('--random_seed', default=24601, help='')
@@ -71,8 +72,6 @@ pp.pprint(args)
 
 # Set the random seed
 torch.manual_seed(int(args['random_seed']))
-# Enable/disable GPU
-USE_CUDA = args['use_cuda']
 
 # Optionally configure tensorboard
 if not args['disable_tensorboard']:
@@ -133,10 +132,12 @@ else:
         int(args['n_process_blocks']), 
         int(args['n_layers']), 
         float(args['tanh_exploration']),
+        args['use_tanh'],
         float(args['dropout']),
         int(args['beam_size']),
         reward_fn,
-        args['is_train'])
+        args['is_train'],
+        args['use_cuda'])
 
 
 save_dir = os.path.join(os.getcwd(),
@@ -156,7 +157,7 @@ actor_optim = optim.Adam(model.actor_net.parameters(), lr=float(args['actor_net_
 training_dataloader = DataLoader(training_dataset, batch_size=int(args['batch_size']),
     shuffle=True, num_workers=4)
 
-validation_dataloader = DataLoader(val_dataset, batch_size=1, shuffle=True, num_workers=1)
+validation_dataloader = DataLoader(val_dataset, batch_size=1, shuffle=True, num_workers=4)
 
 
 if args['use_cuda']:
@@ -182,28 +183,36 @@ for i in range(epoch, epoch + int(args['n_epochs'])):
         # sample_batch is [batch_size x input_dim x sourceL]
         for batch_id, sample_batch in enumerate(tqdm(training_dataloader,
                 disable=args['disable_progress_bar'])):
-            
+
             bat = Variable(sample_batch)
-            if USE_CUDA:
+            if args['use_cuda']:
                 bat = bat.cuda()
 
             R, v, probs, actions, actions_idxs = model(bat)
         
             advantage = R - v.squeeze(1)
-        
+            
             logprobs = 0
+            nll = 0
             for prob in probs: 
                 # compute the sum of the log probs
-                logprobs += torch.log(prob)
+                # for each tour in the batch
+                logprob = torch.log(prob)
+                nll += -logprob
+                logprobs += logprob
+           
+            # guard against nan
+            nll[nll != nll] = 0.
+            # clamp any -inf's to 0 to throw away this tour
+            logprobs[logprobs < -1000] = 0.
 
             # multiply each time step by the advanrate
             reinforce = advantage * logprobs
-
-            actor_loss = reinforce.mean()
+            actor_loss = -args['reward_scale'] * reinforce.mean()
             actor_optim.zero_grad()
             
             actor_loss.backward(retain_graph=True)
-            
+           
             # clip gradient norms
             torch.nn.utils.clip_grad_norm(model.actor_net.parameters(),
                     float(args['max_grad_norm']), norm_type=2)
@@ -211,7 +220,7 @@ for i in range(epoch, epoch + int(args['n_epochs'])):
             actor_optim.step()
            
             R = R.detach()
-            critic_loss = critic_mse(v, R)
+            critic_loss = critic_mse(v.squeeze(1), R)
             critic_optim.zero_grad()
             critic_loss.backward()
             
@@ -226,6 +235,7 @@ for i in range(epoch, epoch + int(args['n_epochs'])):
                 log_value('avg_reward', R.mean().data[0], step)
                 log_value('actor_loss', actor_loss.data[0], step)
                 log_value('critic_loss', critic_loss.data[0], step)
+                log_value('nll', nll.mean().data[0], step)
 
             if step % int(args['log_step']) == 0:
                 print('epoch: {}, train_batch_id: {}, avg_reward: {}'.format(
@@ -238,7 +248,7 @@ for i in range(epoch, epoch + int(args['n_epochs'])):
                     else:
                         example_output.append(action[0].data[0])  # <-- ?? 
                     example_input.append(sample_batch[0, :, idx][0])
-                print('Example train input: {}'.format(example_input))
+                #print('Example train input: {}'.format(example_input))
                 print('Example train output: {}'.format(example_output))
 
             if step % int(args['actor_lr_decay_step']) == 0 and \
@@ -270,7 +280,7 @@ for i in range(epoch, epoch + int(args['n_epochs'])):
             disable=args['disable_progress_bar'])):
         bat = Variable(val_batch)
 
-        if USE_CUDA:
+        if args['use_cuda']:
             bat = bat.cuda()
 
         R, v, probs, actions, action_idxs = model(bat)
@@ -291,7 +301,7 @@ for i in range(epoch, epoch + int(args['n_epochs'])):
                     example_output.append(action[0].data[0])
                 example_input.append(bat[0, :, idx].data[0])
             print('Step: {}'.format(batch_id))
-            print('Example test input: {}'.format(example_input))
+            #print('Example test input: {}'.format(example_input))
             print('Example test output: {}'.format(example_output))
             print('Example test reward: {}'.format(R[0].data[0]))
     

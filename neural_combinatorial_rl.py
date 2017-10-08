@@ -8,18 +8,17 @@ import numpy as np
 
 from beam_search import Beam
 
-USE_CUDA = True
-
 
 class Encoder(nn.Module):
     """Maps a graph represented as an input sequence
     to a hidden vector"""
-    def __init__(self, input_dim, hidden_dim, n_layers, dropout):
+    def __init__(self, input_dim, hidden_dim, n_layers, dropout, use_cuda):
         super(Encoder, self).__init__()
         self.hidden_dim = hidden_dim
         self.n_layers = n_layers
         self.lstm = nn.LSTM(input_dim, hidden_dim, n_layers,
                 dropout=dropout)
+        self.use_cuda = use_cuda
     
     def forward(self, x, hidden):
         output, hidden = self.lstm(x, hidden)
@@ -27,35 +26,34 @@ class Encoder(nn.Module):
     
     def init_hidden(self, inputs):
         batch_size = inputs.size(1)
-        hx = autograd.Variable(torch.zeros(self.n_layers,
+        hx = Variable(torch.zeros(self.n_layers,
             batch_size,
             self.hidden_dim),
             requires_grad=False)
-        cx = autograd.Variable(torch.zeros(self.n_layers,
+        cx = Variable(torch.zeros(self.n_layers,
             batch_size,
             self.hidden_dim),
             requires_grad=False)
-        if USE_CUDA:
+        if self.use_cuda:
             return hx.cuda(), cx.cuda()
         else:
             return hx, cx
 
 class Attention(nn.Module):
     """A generic attention module for a decoder in seq2seq"""
-    def __init__(self, dim, use_tanh=False, C=10):
+    def __init__(self, dim, use_tanh=False, C=10, use_cuda=True):
         super(Attention, self).__init__()
         self.use_tanh = use_tanh
         self.project_query = nn.Linear(dim, dim)
         self.project_ref = nn.Conv1d(dim, dim, 1, 1)
         self.C = C  # tanh exploration
-        self.sm = nn.Softmax()
         self.tanh = nn.Tanh()
         
-        self.v = autograd.Variable(torch.FloatTensor(dim))
+        v = torch.FloatTensor(dim)
+        if use_cuda:
+            v = v.cuda()  
+        self.v = nn.Parameter(v)
         self.v.data.uniform_(-(1. / math.sqrt(dim)) , 1. / math.sqrt(dim))
-
-        if USE_CUDA:
-            self.v = self.v.cuda()
         
     def forward(self, query, ref):
         """
@@ -78,13 +76,10 @@ class Attention(nn.Module):
         # [batch_size x 1 x hidden_dim] * [batch_size x hidden_dim x sourceL]
         u = torch.bmm(v_view, self.tanh(expanded_q + e)).squeeze(1)
         if self.use_tanh:
-            scores = self.sm(self.C * self.tanh(u))
+            logits = self.C * self.tanh(u)
         else:
-            scores = self.sm(u)  # batch_size x sourceL
-        # [batch_size x h_dim x sourceL] * [batch_size x sourceL x 1] = 
-        # [batch_size x h_dim x 1]
-        att_state = torch.bmm(e, scores.unsqueeze(2)).squeeze(2)  
-        return att_state, scores
+            logits = u  
+        return e, logits
 
 
 class Decoder(nn.Module):
@@ -94,10 +89,12 @@ class Decoder(nn.Module):
             max_length,
             tanh_exploration,
             terminating_symbol,
+            use_tanh,
             decode_type,
             dropout,
             n_glimpses=1,
-            beam_size=0):
+            beam_size=0,
+            use_cuda=True):
         super(Decoder, self).__init__()
         
         self.embedding_dim = embedding_dim
@@ -107,14 +104,37 @@ class Decoder(nn.Module):
         self.terminating_symbol = terminating_symbol 
         self.decode_type = decode_type
         self.beam_size = beam_size
+        self.use_cuda = use_cuda
 
         self.dropout = nn.Dropout(p=dropout)
         self.input_weights = nn.Linear(embedding_dim, 4 * hidden_dim)
         self.hidden_weights = nn.Linear(hidden_dim, 4 * hidden_dim)
         self.linear_hidden_out = nn.Linear(hidden_dim * 2, hidden_dim)
 
-        self.pointer = Attention(hidden_dim, use_tanh=True, C=tanh_exploration)
-        self.glimpse = Attention(hidden_dim)
+        self.pointer = Attention(hidden_dim, use_tanh=use_tanh, C=tanh_exploration, use_cuda=self.use_cuda)
+        self.glimpse = Attention(hidden_dim, use_tanh=use_tanh, C=tanh_exploration, use_cuda=self.use_cuda)
+        self.sm = nn.Softmax()
+
+        # self.neg_inf = Variable(torch.Tensor([float('-inf')]))
+        # if self.use_cuda:
+        #     self.neg_inf = self.neg_inf.cuda()
+        
+    def apply_mask_to_logits(self, step, logits, mask, prev_idxs):    
+        if mask is None:
+            mask = torch.zeros(logits.size()).byte()
+            if self.use_cuda:
+                mask = mask.cuda()
+
+        # to prevent them from being reselected. 
+        # Or, allow re-selection and penalize in the objective function
+        if prev_idxs is not None:
+            #mask_size = logits.size(0) * step
+            #n_inf = self.neg_inf.repeat(mask_size)
+            # set most recently selected idx values to 1
+            mask[[x for x in range(logits.size(0))],
+                    prev_idxs.data] = 1
+            logits[mask] = -np.inf
+        return logits, mask
 
     def forward(self, decoder_input, embedded_inputs, hidden, context):
         """
@@ -126,7 +146,7 @@ class Decoder(nn.Module):
                 Initially this is set to (enc_h[-1], enc_c[-1])
             context: encoder outputs, [sourceL x batch_size x hidden_dim] 
         """
-        def recurrence(x, hidden):
+        def recurrence(x, hidden, logit_mask, prev_idxs, step):
             
             x = self.dropout(x)
 
@@ -145,12 +165,16 @@ class Decoder(nn.Module):
             
             g_l = hy
             for i in range(self.n_glimpses):
-                g_l, _ = self.glimpse(g_l, context)
-            
-            h_tilde, output = self.pointer(g_l, context)
-            h_tilde = F.tanh(self.linear_hidden_out(torch.cat((h_tilde, hy), 1)))
-
-            return h_tilde, cy, output
+                ref, logits = self.glimpse(g_l, context)
+                logits, logit_mask = self.apply_mask_to_logits(step, logits, logit_mask, prev_idxs)
+                # [batch_size x h_dim x sourceL] * [batch_size x sourceL x 1] = 
+                # [batch_size x h_dim x 1]
+                g_l = torch.bmm(ref, self.sm(logits).unsqueeze(2)).squeeze(2) 
+            _, logits = self.pointer(g_l, context)
+            #h_tilde = F.tanh(self.linear_hidden_out(torch.cat((h_tilde, hy), 1)))
+            logits, logit_mask = self.apply_mask_to_logits(step, logits, logit_mask, prev_idxs)
+            probs = self.sm(logits)
+            return hy, cy, probs, logit_mask
     
         batch_size = context.size(1)
         outputs = []
@@ -162,18 +186,18 @@ class Decoder(nn.Module):
        
         if self.decode_type == "stochastic":
             for i in steps:
-                hx, cx, outs = recurrence(decoder_input, hidden)
+
+                hx, cx, probs, mask = recurrence(decoder_input, hidden, mask, idxs, i)
                 hidden = (hx, cx)
                 # select the next inputs for the decoder [batch_size x hidden_dim]
-                decoder_input, idxs, mask = self.decode_stochastic(outs,
-                        embedded_inputs,
-                        idxs, 
-                        mask)
+                decoder_input, idxs = self.decode_stochastic(
+                    probs,
+                    embedded_inputs,
+                    selections)
                 inps.append(decoder_input) 
                 # use outs to point to next object
-                outputs.append(outs)
+                outputs.append(probs)
                 selections.append(idxs)
-
             return (outputs, selections), hidden
         
         elif self.decode_type == "beam_search":
@@ -185,28 +209,28 @@ class Decoder(nn.Module):
                     Variable(hidden[1].data.repeat(self.beam_size, 1)))
             
             beam = [
-                    Beam(self.beam_size, self.max_length, cuda=USE_CUDA) 
+                    Beam(self.beam_size, self.max_length, cuda=self.use_cuda) 
                     for k in range(batch_size)
             ]
             
             for i in steps:
-                hx, cx, outs = recurrence(decoder_input, hidden)
+                hx, cx, probs, mask = recurrence(decoder_input, hidden, mask, idxs, i)
                 hidden = (hx, cx)
                 
-                outs = outs.view(self.beam_size, batch_size, -1
+                probs = probs.view(self.beam_size, batch_size, -1
                         ).transpose(0, 1).contiguous()
                 
                 n_best = 1
                 # select the next inputs for the decoder [batch_size x hidden_dim]
-                decoder_input, idxs, active, mask = self.decode_beam(outs,
-                        embedded_inputs, beam, batch_size, n_best, idxs, mask)
+                decoder_input, idxs, active = self.decode_beam(probs,
+                        embedded_inputs, beam, batch_size, n_best, i)
                
                 inps.append(decoder_input) 
-                # use outs to point to next object
+                # use probs to point to next object
                 if self.beam_size > 1:
-                    outputs.append(outs[:, 0,:])
+                    outputs.append(probs[:, 0,:])
                 else:
-                    outputs.append(outs.squeeze(0))
+                    outputs.append(probs.squeeze(0))
                 # Check for indexing
                 selections.append(idxs)
                  # Should be done decoding
@@ -216,64 +240,43 @@ class Decoder(nn.Module):
 
             return (outputs, selections), hidden
 
-    def decode_stochastic(self, logits, embedded_inputs, prev=None, logit_mask=None):
+    def decode_stochastic(self, probs, embedded_inputs, selections):
         """
         Return the next input for the decoder by selecting the 
         input corresponding to the max output
 
         Args: 
-            logits: [batch_size x sourceL]
+            probs: [batch_size x sourceL]
             embedded_inputs: [sourceL x batch_size x embedding_dim]
-            prev: list of Tensors containing previously selected indices
-            logit_mask: bit mask for zero'ing out previously selected logits
        Returns:
             Tensor of size [batch_size x sourceL] containing the embeddings
             from the inputs corresponding to the [batch_size] indices
             selected for this iteration of the decoding, as well as the mask
         """
-        batch_size = logits.size(0)
-        logits_ = logits.clone()
-        
-        if logit_mask is None:
-            logit_mask = torch.zeros(logits.size()).byte()
-            if USE_CUDA:
-                logit_mask = logit_mask.cuda()
-
-        # to prevent them from being reselected. 
-        # Or, allow re-selection and penalize in the objective function
-        if prev is not None:
-            logit_mask[[x for x in range(batch_size)],
-                    prev.data] = 1
-            logits_[logit_mask] = 0
-            # renormalize
-            logits_ /= logits_.sum()
-        
+        batch_size = probs.size(0)
         # idxs is [batch_size]
-        idxs = logits_.multinomial().squeeze(1)
+        idxs = probs.multinomial().squeeze(1)
+
+        # due to race conditions, might need to resample here
+        for old_idxs in selections:
+            # compare new idxs
+            # elementwise with the previous idxs. If any matches,
+            # then need to resample
+            if old_idxs.eq(idxs).data.any():
+                print(' [!] resampling due to race condition')
+                idxs = probs.multinomial().squeeze(1)
+                break
+
         sels = embedded_inputs[idxs.data, [i for i in range(batch_size)], :] 
-        return sels, idxs, logit_mask
+        return sels, idxs
 
-    def decode_beam(self, logits, embedded_inputs, beam, batch_size, n_best, prev=None, logit_mask=None):
-        logits_ = logits.clone()
-
-        if logit_mask is None:
-            logit_mask = torch.zeros(logits_.size()).byte()
-            if USE_CUDA:
-                logit_mask = logit_mask.cuda()
-
-        # to prevent them from being reselected. 
-        # Or, allow re-selection and penalize in the objective function
-        if prev is not None:
-            logit_mask[0,:,prev.data[0]] = 1
-            logits_[logit_mask] = 0
-            logits_ /= logits_.sum()
-
+    def decode_beam(self, probs, embedded_inputs, beam, batch_size, n_best, step):
         active = []
         for b in range(batch_size):
             if beam[b].done:
                 continue
 
-            if not beam[b].advance(logits_.data[b]):
+            if not beam[b].advance(probs.data[b]):
                 active += [b]
         
         
@@ -299,7 +302,7 @@ class Decoder(nn.Module):
             else:
                 idxs = all_idxs
         
-        if USE_CUDA:
+        if self.use_cuda:
             idxs = idxs.cuda()
 
         if idxs.dim() > 1:
@@ -307,41 +310,45 @@ class Decoder(nn.Module):
                     [x for x in range(batch_size)], :]
         else:
             x = embedded_inputs[idxs.data, [x for x in range(batch_size)], :]
-        return x.view(idxs.size(0) * n_best, embedded_inputs.size(2)), idxs, active, logit_mask
+        return x.view(idxs.size(0) * n_best, embedded_inputs.size(2)), idxs, active
 
 class PointerNetwork(nn.Module):
     """The pointer network, which is the core seq2seq 
     model"""
     def __init__(self, 
+            encoder,
             embedding_dim,
             hidden_dim,
             max_decoding_len,
             terminating_symbol,
             n_glimpses,
-            n_layers,
             tanh_exploration,
+            use_tanh,
             dropout,
-            beam_size):
+            beam_size,
+            use_cuda):
         super(PointerNetwork, self).__init__()
 
-        self.encoder = Encoder(
-                embedding_dim,
-                hidden_dim,
-                n_layers,
-                dropout)
+        self.encoder = encoder
 
         self.decoder = Decoder(
                 embedding_dim,
                 hidden_dim,
                 max_length=max_decoding_len,
                 tanh_exploration=tanh_exploration,
+                use_tanh=use_tanh,
                 terminating_symbol=terminating_symbol,
                 decode_type="stochastic",
                 dropout=dropout,
                 n_glimpses=n_glimpses,
-                beam_size=beam_size)
+                beam_size=beam_size,
+                use_cuda=use_cuda)
         
-        self.decoder_in_0 = nn.Parameter(torch.FloatTensor(embedding_dim))
+        dec_in_0 = torch.FloatTensor(embedding_dim)
+        if use_cuda:
+            dec_in_0 = dec_in_0.cuda()
+
+        self.decoder_in_0 = nn.Parameter(dec_in_0)
         self.decoder_in_0.data.uniform_(-(1. / math.sqrt(embedding_dim)),
                 1. / math.sqrt(embedding_dim))
             
@@ -361,32 +368,31 @@ class PointerNetwork(nn.Module):
         # repeat decoder_in_0 across batch
         decoder_input = self.decoder_in_0.unsqueeze(0).repeat(inputs.size(1), 1)
         
-        (pointer_logits, input_idxs), dec_hidden_t = self.decoder(decoder_input,
+        (pointer_probs, input_idxs), dec_hidden_t = self.decoder(decoder_input,
                 inputs,
                 dec_init_state,
                 enc_outputs)
 
-        return pointer_logits, input_idxs
+        return pointer_probs, input_idxs
         
 
 class CriticNetwork(nn.Module):
     """Useful as a baseline in REINFORCE updates"""
     def __init__(self,
-            embedding_dim,
+            encoder,
             hidden_dim,
             n_process_block_iters,
-            n_layers,
-            dropout):
+            tanh_exploration,
+            use_tanh,
+            use_cuda):
         super(CriticNetwork, self).__init__()
-        self.embedding_dim = embedding_dim
+        
         self.hidden_dim = hidden_dim
         self.n_process_block_iters = n_process_block_iters
 
-        self.encoder = Encoder(self.embedding_dim,
-                self.hidden_dim,
-                n_layers,
-                dropout)
-        self.process_block = Attention(hidden_dim)
+        self.encoder = encoder
+        self.process_block = Attention(hidden_dim, use_tanh=use_tanh, C=tanh_exploration, use_cuda=use_cuda)
+        self.sm = nn.Softmax()
         self.decoder = nn.Sequential(
                 nn.Linear(hidden_dim, hidden_dim),
                 nn.ReLU(),
@@ -406,7 +412,8 @@ class CriticNetwork(nn.Module):
         # grab the hidden state and process it via the process block 
         process_block_state = enc_h_t[-1]
         for i in range(self.n_process_block_iters):
-            process_block_state, _ = self.process_block(process_block_state, enc_outputs)        
+            ref, logits = self.process_block(process_block_state, enc_outputs)
+            process_block_state = torch.bmm(ref, self.sm(logits).unsqueeze(2)).squeeze(2)
         # produce the final scalar output
         out = self.decoder(process_block_state)
         return out
@@ -427,42 +434,55 @@ class NeuralCombOptRL(nn.Module):
             n_process_block_iters,
             n_layers,
             tanh_exploration,
+            use_tanh,
             dropout,
             beam_size,
             objective_fn,
-            is_train):
+            is_train,
+            use_cuda):
         super(NeuralCombOptRL, self).__init__()
         self.objective_fn = objective_fn
         self.input_dim = input_dim
         self.is_train = is_train
+        self.use_cuda = use_cuda
 
+        self.encoder = Encoder(
+                embedding_dim,
+                hidden_dim,
+                n_layers,
+                dropout,
+                use_cuda)
+        
         self.actor_net = PointerNetwork(
+                self.encoder,
                 embedding_dim,
                 hidden_dim,
                 max_decoding_len,
                 terminating_symbol,
                 n_glimpses,
-                n_layers,
                 tanh_exploration,
+                use_tanh,
                 dropout,
-                beam_size)
-        self.critic_net = CriticNetwork(embedding_dim,
+                beam_size,
+                use_cuda)
+        self.critic_net = CriticNetwork(
+                self.encoder,
                 hidden_dim,
                 n_process_block_iters,
-                n_layers,
-                dropout)
+                tanh_exploration,
+                use_tanh,
+                use_cuda)
        
         embedding_ = torch.FloatTensor(input_dim,
             embedding_dim)
         
-        if USE_CUDA: 
+        if self.use_cuda: 
             embedding_ = embedding_.cuda()
 
         self.embedding = nn.Parameter(embedding_)
          
-        #self.embedding.data.uniform_(-(1. / math.sqrt(embedding_dim)),
-        #    1. / math.sqrt(embedding_dim))
-        self.embedding.data.uniform_(-0.08, 0.08)
+        self.embedding.data.uniform_(-(1. / math.sqrt(embedding_dim)),
+            1. / math.sqrt(embedding_dim))
         
     def forward(self, inputs):
         """
@@ -495,7 +515,7 @@ class NeuralCombOptRL(nn.Module):
 
         # query the actor net for the input indices 
         # making up the output, and the pointer attn 
-        logits_, action_idxs = self.actor_net(embedded_inputs)
+        probs_, action_idxs = self.actor_net(embedded_inputs)
        
         # Select the actions (inputs pointed to 
         # by the pointer net) and the corresponding
@@ -509,20 +529,20 @@ class NeuralCombOptRL(nn.Module):
             actions.append(inputs_[[x for x in range(batch_size)], action_id.data, :])
 
         if self.is_train:
-            # logits_ is a list of len sourceL of [batch_size x sourceL]
-            logits = []
-            for logit, action_id in zip(logits_, action_idxs):
-                logits.append(logit[[x for x in range(batch_size)], action_id.data])
+            # probs_ is a list of len sourceL of [batch_size x sourceL]
+            probs = []
+            for prob, action_id in zip(probs_, action_idxs):
+                probs.append(prob[[x for x in range(batch_size)], action_id.data])
         else:
             # return the list of len sourceL of [batch_size x sourceL]
-            logits = logits_
+            probs = probs_
 
         # get the critic value fn estimates for the baseline
         # [batch_size]
         v = self.critic_net(embedded_inputs)
     
         # [batch_size]
-        R = self.objective_fn(actions, USE_CUDA)
+        R = self.objective_fn(actions, self.use_cuda)
         
-        return R, v, logits, actions, action_idxs
+        return R, v, probs, actions, action_idxs
     
