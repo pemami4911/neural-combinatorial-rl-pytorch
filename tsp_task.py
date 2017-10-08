@@ -37,7 +37,13 @@ def reward(sample_solution, USE_CUDA=False):
     
     tour_len += torch.norm(sample_solution[n-1] - sample_solution[0], dim=1)
 
-    return 1./tour_len
+    # For TSP_20 - map to a number between 0 and 1
+    # min_len = 3.5
+    # max_len = 10.
+    # TODO: generalize this for any TSP size
+    tour_len = -0.1538*tour_len + 1.538 
+    tour_len[tour_len < 0.] = 0.
+    return tour_len
 
 #######################################
 # Functions for downloading dataset
