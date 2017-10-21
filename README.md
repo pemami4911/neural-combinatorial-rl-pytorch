@@ -1,5 +1,7 @@
 # neural-combinatorial-rl-pytorch
 
+**WORK IN PROGRESS**
+
 PyTorch implementation of [Neural Combinatorial Optimization with Reinforcement Learning](https://arxiv.org/abs/1611.09940). 
 
 So far, I have implemented the basic RL pretraining model from the paper. An implementation of the supervised learning baseline model is available [here](https://github.com/pemami4911/neural-combinatorial-rl-tensorflow). 
