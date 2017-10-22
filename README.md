@@ -6,7 +6,7 @@ PyTorch implementation of [Neural Combinatorial Optimization with Reinforcement 
 
 So far, I have implemented the basic RL pretraining model from the paper. An implementation of the supervised learning baseline model is available [here](https://github.com/pemami4911/neural-combinatorial-rl-tensorflow). 
 
-My implementation uses a stochastic decoding policy in the pointer network, realized via PyTorch's `torch.multinomial()`, during training, and beam search for decoding when testing the model. Other modifications I made include using dropout in the encoder of the pointer network and the critic network. A dropout value of `0.1` significantly improved the results. Otherwise, I used the same hyperparameters as mentioned in the paper. 
+My implementation uses a stochastic decoding policy in the pointer network, realized via PyTorch's `torch.multinomial()`, during training, and beam search (not yet finished, only supports 1 beam a.k.a. greedy) for decoding when testing the model. I have tried to use the same hyperparameters as mentioned in the paper but have not yet been able to replicate results from TSP. 
 
 Currently, there is support for a sorting task and the Planar Symmetric Euclidean TSP.
 
