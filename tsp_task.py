@@ -41,9 +41,10 @@ def reward(sample_solution, USE_CUDA=False):
     # min_len = 3.5
     # max_len = 10.
     # TODO: generalize this for any TSP size
-    tour_len = -0.1538*tour_len + 1.538 
-    tour_len[tour_len < 0.] = 0.
+    #tour_len = -0.1538*tour_len + 1.538 
+    #tour_len[tour_len < 0.] = 0.
     return tour_len
+
 
 #######################################
 # Functions for downloading dataset
@@ -213,8 +214,11 @@ def create_dataset(
 #######################################
 class TSPDataset(Dataset):
     
-    def __init__(self, dataset_fname=None, train=False, size=50, num_samples=1000000):
+    def __init__(self, dataset_fname=None, train=False, size=50, num_samples=1000000, random_seed=1111):
         super(TSPDataset, self).__init__()
+        #start = torch.FloatTensor([[-1], [-1]]) 
+        
+        torch.manual_seed(random_seed)
 
         self.data_set = []
         if not train:
@@ -229,6 +233,7 @@ class TSPDataset(Dataset):
             # randomly sample points uniformly from [0, 1]
             for l in tqdm(range(num_samples)):
                 x = torch.FloatTensor(2, size).uniform_(0, 1)
+                #x = torch.cat([start, x], 1)
                 self.data_set.append(x)
 
         self.size = len(self.data_set)

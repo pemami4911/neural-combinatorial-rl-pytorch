@@ -11,6 +11,7 @@ import torch
 print(torch.__version__)
 import torch.optim as optim
 import torch.autograd as autograd
+from torch.optim import lr_scheduler
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from tensorboard_logger import configure, log_value
@@ -33,14 +34,13 @@ parser.add_argument('--val_size', default=10000, help='')
 parser.add_argument('--embedding_dim', default=128, help='Dimension of input embedding')
 parser.add_argument('--hidden_dim', default=128, help='Dimension of hidden layers in Enc/Dec')
 parser.add_argument('--n_process_blocks', default=3, help='Number of process block iters to run in the Critic network')
-parser.add_argument('--n_layers', default=1, help='Number of LSTM layers in the encoder')
 parser.add_argument('--n_glimpses', default=2, help='No. of glimpses to use in the pointer network')
 parser.add_argument('--use_tanh', type=str2bool, default=True)
-parser.add_argument('--tanh_exploration', default=20, help='Hyperparam controlling exploration in the pointer net by scaling the tanh in the softmax')
+parser.add_argument('--tanh_exploration', default=10, help='Hyperparam controlling exploration in the pointer net by scaling the tanh in the softmax')
 parser.add_argument('--dropout', default=0., help='')
 parser.add_argument('--terminating_symbol', default='<0>', help='')
 parser.add_argument('--beam_size', default=1, help='Beam width for beam search')
-parser.add_argument('--entropy_coeff', default=0.01, type=float, help='hyperparam for controlling entropy penalty')
+
 # Training
 parser.add_argument('--actor_net_lr', default=1e-4, help="Set the learning rate for the actor network")
 parser.add_argument('--critic_net_lr', default=1e-4, help="Set the learning rate for the critic network")
@@ -113,6 +113,8 @@ else:
 
 # Load the model parameters from a saved state
 if args['load_path'] != '':
+    print('  [*] Loading model from {}'.format(args['load_path']))
+
     model = torch.load(
         os.path.join(
             os.getcwd(),
@@ -130,10 +132,8 @@ else:
         args['terminating_symbol'],
         int(args['n_glimpses']),
         int(args['n_process_blocks']), 
-        int(args['n_layers']), 
         float(args['tanh_exploration']),
         args['use_tanh'],
-        float(args['dropout']),
         int(args['beam_size']),
         reward_fn,
         args['is_train'],
@@ -154,10 +154,18 @@ critic_mse = torch.nn.MSELoss()
 critic_optim = optim.Adam(model.critic_net.parameters(), lr=float(args['critic_net_lr']))
 actor_optim = optim.Adam(model.actor_net.parameters(), lr=float(args['actor_net_lr']))
 
-training_dataloader = DataLoader(training_dataset, batch_size=int(args['batch_size']),
-    shuffle=True, num_workers=4)
+actor_scheduler = lr_scheduler.MultiStepLR(actor_optim,
+        range(int(args['actor_lr_decay_step']), int(args['actor_lr_decay_step']) * 1000,
+            int(args['actor_lr_decay_step'])), gamma=float(args['actor_lr_decay_rate']))
 
-validation_dataloader = DataLoader(val_dataset, batch_size=1, shuffle=True, num_workers=4)
+critic_scheduler = lr_scheduler.MultiStepLR(critic_optim,
+        range(int(args['critic_lr_decay_step']), int(args['critic_lr_decay_step']) * 1000,
+            int(args['critic_lr_decay_step'])), gamma=float(args['critic_lr_decay_rate']))
+
+training_dataloader = DataLoader(training_dataset, batch_size=int(args['batch_size']),
+    shuffle=True, num_workers=1)
+
+validation_dataloader = DataLoader(val_dataset, batch_size=1, shuffle=True, num_workers=1)
 
 
 if args['use_cuda']:
@@ -184,6 +192,7 @@ for i in range(epoch, epoch + int(args['n_epochs'])):
         for batch_id, sample_batch in enumerate(tqdm(training_dataloader,
                 disable=args['disable_progress_bar'])):
 
+
             bat = Variable(sample_batch)
             if args['use_cuda']:
                 bat = bat.cuda()
@@ -208,7 +217,7 @@ for i in range(epoch, epoch + int(args['n_epochs'])):
 
             # multiply each time step by the advanrate
             reinforce = advantage * logprobs
-            actor_loss = -args['reward_scale'] * reinforce.mean()
+            actor_loss = args['reward_scale'] * reinforce.mean()
             actor_optim.zero_grad()
             
             actor_loss.backward(retain_graph=True)
@@ -218,7 +227,9 @@ for i in range(epoch, epoch + int(args['n_epochs'])):
                     float(args['max_grad_norm']), norm_type=2)
 
             actor_optim.step()
-           
+            actor_scheduler.step()
+            critic_scheduler.step()
+
             R = R.detach()
             critic_loss = critic_mse(v.squeeze(1), R)
             critic_optim.zero_grad()
@@ -251,19 +262,18 @@ for i in range(epoch, epoch + int(args['n_epochs'])):
                 #print('Example train input: {}'.format(example_input))
                 print('Example train output: {}'.format(example_output))
 
-            if step % int(args['actor_lr_decay_step']) == 0 and \
-                    float(args['actor_net_lr']) > 1e-10:
+            """
+            if step % int(args['actor_lr_decay_step']) == 0:
                 args['actor_net_lr'] = float(args['actor_net_lr']) \
                         * float(args['actor_lr_decay_rate'])
                 actor_optim = optim.Adam(model.actor_net.parameters(),
                         lr=float(args['actor_net_lr']))
-            if step % int(args['critic_lr_decay_step']) == 0 and \
-                    float(args['critic_net_lr']) > 1e-10:
+            if step % int(args['critic_lr_decay_step']) == 0:
                 args['critic_net_lr'] = float(args['critic_net_lr']) \
                         * float(args['critic_lr_decay_rate'])
                 critic_optim = optim.Adam(model.critic_net.parameters(),
                         lr=float(args['critic_net_lr']))
-
+            """
     # Use beam search decoding for validation
     model.actor_net.decoder.decode_type = "beam_search"
     
@@ -325,4 +335,4 @@ for i in range(epoch, epoch + int(args['n_epochs'])):
             training_dataset = tsp_task.TSPDataset(train=True, size=size,
                 num_samples=int(args['train_size']))
             training_dataloader = DataLoader(training_dataset, batch_size=int(args['batch_size']),
-                shuffle=True, num_workers=4)
+                shuffle=True, num_workers=1)
