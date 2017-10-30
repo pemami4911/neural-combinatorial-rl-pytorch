@@ -25,21 +25,20 @@ class Encoder(nn.Module):
     
     def init_hidden(self, hidden_dim):
         """Trainable initial hidden state"""
-        enc_init_hx = torch.FloatTensor(hidden_dim)
+        enc_init_hx = Variable(torch.zeros(hidden_dim), requires_grad=False)
         if self.use_cuda:
             enc_init_hx = enc_init_hx.cuda()
 
-        enc_init_hx = nn.Parameter(enc_init_hx)
-        enc_init_hx.data.uniform_(-(1. / math.sqrt(hidden_dim)),
-                1. / math.sqrt(hidden_dim))
+        #enc_init_hx.data.uniform_(-(1. / math.sqrt(hidden_dim)),
+        #        1. / math.sqrt(hidden_dim))
 
-        enc_init_cx = torch.FloatTensor(hidden_dim)
+        enc_init_cx = Variable(torch.zeros(hidden_dim), requires_grad=False)
         if self.use_cuda:
             enc_init_cx = enc_init_cx.cuda()
 
-        enc_init_cx = nn.Parameter(enc_init_cx)
-        enc_init_cx.data.uniform_(-(1. / math.sqrt(hidden_dim)),
-                1. / math.sqrt(hidden_dim))
+        #enc_init_cx = nn.Parameter(enc_init_cx)
+        #enc_init_cx.data.uniform_(-(1. / math.sqrt(hidden_dim)),
+        #        1. / math.sqrt(hidden_dim))
         return (enc_init_hx, enc_init_cx)
 
 
@@ -240,10 +239,12 @@ class Decoder(nn.Module):
         Args: 
             probs: [batch_size x sourceL]
             embedded_inputs: [sourceL x batch_size x embedding_dim]
+            selections: list of all of the previously selected indices during decoding
        Returns:
             Tensor of size [batch_size x sourceL] containing the embeddings
             from the inputs corresponding to the [batch_size] indices
-            selected for this iteration of the decoding, as well as the mask
+            selected for this iteration of the decoding, as well as the 
+            corresponding indicies
         """
         batch_size = probs.size(0)
         # idxs is [batch_size]
@@ -459,13 +460,13 @@ class NeuralCombOptRL(nn.Module):
                 beam_size,
                 use_cuda)
         
-        self.critic_net = CriticNetwork(
-                embedding_dim,
-                hidden_dim,
-                n_process_block_iters,
-                tanh_exploration,
-                False,
-                use_cuda)
+        #self.critic_net = CriticNetwork(
+        #        embedding_dim,
+        #        hidden_dim,
+        #        n_process_block_iters,
+        #        tanh_exploration,
+        #        False,
+        #        use_cuda)
        
         embedding_ = torch.FloatTensor(input_dim,
             embedding_dim)
@@ -474,7 +475,7 @@ class NeuralCombOptRL(nn.Module):
         self.embedding = nn.Parameter(embedding_) 
         self.embedding.data.uniform_(-(1. / math.sqrt(embedding_dim)),
             1. / math.sqrt(embedding_dim))
-        
+
     def forward(self, inputs):
         """
         Args:
@@ -530,10 +531,11 @@ class NeuralCombOptRL(nn.Module):
 
         # get the critic value fn estimates for the baseline
         # [batch_size]
-        v = self.critic_net(embedded_inputs)
+        #v = self.critic_net(embedded_inputs)
     
         # [batch_size]
         R = self.objective_fn(actions, self.use_cuda)
         
-        return R, v, probs, actions, action_idxs
-    
+        #return R, v, probs, actions, action_idxs
+        return R, probs, actions, action_idxs
+

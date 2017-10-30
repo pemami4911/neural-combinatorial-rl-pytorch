@@ -54,6 +54,8 @@ parser.add_argument('--n_epochs', default=1, help='')
 parser.add_argument('--random_seed', default=24601, help='')
 parser.add_argument('--max_grad_norm', default=2.0, help='Gradient clipping')
 parser.add_argument('--use_cuda', type=str2bool, default=True, help='')
+parser.add_argument('--critic_beta', type=float, default=0.9, help='Exp mvg average decay')
+
 # Misc
 parser.add_argument('--log_step', default=50, help='Log info every log_step steps')
 parser.add_argument('--log_dir', type=str, default='logs')
@@ -150,36 +152,37 @@ try:
 except:
     pass
 
-critic_mse = torch.nn.MSELoss()
-critic_optim = optim.Adam(model.critic_net.parameters(), lr=float(args['critic_net_lr']))
+#critic_mse = torch.nn.MSELoss()
+#critic_optim = optim.Adam(model.critic_net.parameters(), lr=float(args['critic_net_lr']))
 actor_optim = optim.Adam(model.actor_net.parameters(), lr=float(args['actor_net_lr']))
 
 actor_scheduler = lr_scheduler.MultiStepLR(actor_optim,
         range(int(args['actor_lr_decay_step']), int(args['actor_lr_decay_step']) * 1000,
             int(args['actor_lr_decay_step'])), gamma=float(args['actor_lr_decay_rate']))
 
-critic_scheduler = lr_scheduler.MultiStepLR(critic_optim,
-        range(int(args['critic_lr_decay_step']), int(args['critic_lr_decay_step']) * 1000,
-            int(args['critic_lr_decay_step'])), gamma=float(args['critic_lr_decay_rate']))
+#critic_scheduler = lr_scheduler.MultiStepLR(critic_optim,
+#        range(int(args['critic_lr_decay_step']), int(args['critic_lr_decay_step']) * 1000,
+#            int(args['critic_lr_decay_step'])), gamma=float(args['critic_lr_decay_rate']))
 
 training_dataloader = DataLoader(training_dataset, batch_size=int(args['batch_size']),
-    shuffle=True, num_workers=1)
+    shuffle=True, num_workers=4)
 
 validation_dataloader = DataLoader(val_dataset, batch_size=1, shuffle=True, num_workers=1)
 
+critic_exp_mvg_avg = torch.zeros(1)
+beta = args['critic_beta']
 
 if args['use_cuda']:
     model = model.cuda()
-    critic_mse = critic_mse.cuda()
+    #critic_mse = critic_mse.cuda()
+    critic_exp_mvg_avg = critic_exp_mvg_avg.cuda()
 
 step = 0
 val_step = 0
 
 if not args['is_train']:
     args['n_epochs'] = '1'
-
-
-#model.actor_net.decoder.decode_type = "beam_search"
+ 
 
 epoch = int(args['epoch_start'])
 for i in range(epoch, epoch + int(args['n_epochs'])):
@@ -197,9 +200,14 @@ for i in range(epoch, epoch + int(args['n_epochs'])):
             if args['use_cuda']:
                 bat = bat.cuda()
 
-            R, v, probs, actions, actions_idxs = model(bat)
+            R, probs, actions, actions_idxs = model(bat)
         
-            advantage = R - v.squeeze(1)
+            if batch_id == 0:
+                critic_exp_mvg_avg = R.mean()
+            else:
+                critic_exp_mvg_avg = (critic_exp_mvg_avg * beta) + ((1. - beta) * R.mean())
+
+            advantage = R - critic_exp_mvg_avg
             
             logprobs = 0
             nll = 0
@@ -217,35 +225,40 @@ for i in range(epoch, epoch + int(args['n_epochs'])):
 
             # multiply each time step by the advanrate
             reinforce = advantage * logprobs
-            actor_loss = args['reward_scale'] * reinforce.mean()
-            actor_optim.zero_grad()
+            actor_loss = reinforce.mean()
             
-            actor_loss.backward(retain_graph=True)
+            actor_optim.zero_grad()
            
+            actor_loss.backward()
+
             # clip gradient norms
             torch.nn.utils.clip_grad_norm(model.actor_net.parameters(),
                     float(args['max_grad_norm']), norm_type=2)
 
             actor_optim.step()
             actor_scheduler.step()
-            critic_scheduler.step()
 
-            R = R.detach()
-            critic_loss = critic_mse(v.squeeze(1), R)
-            critic_optim.zero_grad()
-            critic_loss.backward()
+            critic_exp_mvg_avg = critic_exp_mvg_avg.detach()
+
+            #critic_scheduler.step()
+
+            #R = R.detach()
+            #critic_loss = critic_mse(v.squeeze(1), R)
+            #critic_optim.zero_grad()
+            #critic_loss.backward()
             
-            torch.nn.utils.clip_grad_norm(model.critic_net.parameters(),
-                    float(args['max_grad_norm']), norm_type=2)
+            #torch.nn.utils.clip_grad_norm(model.critic_net.parameters(),
+            #        float(args['max_grad_norm']), norm_type=2)
 
-            critic_optim.step()
+            #critic_optim.step()
             
             step += 1
             
             if not args['disable_tensorboard']:
                 log_value('avg_reward', R.mean().data[0], step)
                 log_value('actor_loss', actor_loss.data[0], step)
-                log_value('critic_loss', critic_loss.data[0], step)
+                #log_value('critic_loss', critic_loss.data[0], step)
+                log_value('critic_exp_mvg_avg', critic_exp_mvg_avg.data[0], step)
                 log_value('nll', nll.mean().data[0], step)
 
             if step % int(args['log_step']) == 0:
@@ -262,18 +275,6 @@ for i in range(epoch, epoch + int(args['n_epochs'])):
                 #print('Example train input: {}'.format(example_input))
                 print('Example train output: {}'.format(example_output))
 
-            """
-            if step % int(args['actor_lr_decay_step']) == 0:
-                args['actor_net_lr'] = float(args['actor_net_lr']) \
-                        * float(args['actor_lr_decay_rate'])
-                actor_optim = optim.Adam(model.actor_net.parameters(),
-                        lr=float(args['actor_net_lr']))
-            if step % int(args['critic_lr_decay_step']) == 0:
-                args['critic_net_lr'] = float(args['critic_net_lr']) \
-                        * float(args['critic_lr_decay_rate'])
-                critic_optim = optim.Adam(model.critic_net.parameters(),
-                        lr=float(args['critic_net_lr']))
-            """
     # Use beam search decoding for validation
     model.actor_net.decoder.decode_type = "beam_search"
     
@@ -293,7 +294,7 @@ for i in range(epoch, epoch + int(args['n_epochs'])):
         if args['use_cuda']:
             bat = bat.cuda()
 
-        R, v, probs, actions, action_idxs = model(bat)
+        R, probs, actions, action_idxs = model(bat)
         
         avg_reward.append(R[0].data[0])
         val_step += 1.

@@ -12,15 +12,21 @@ if __name__ == '__main__':
   
 
     exps = [4]
-    num = np.arange(1, 9)
+    #num = np.arange(1, 9)
+    num = [2]
 
-    #num_trials = 25
+    num_trials = 10
     
     seeds = [123, 343]
 
-    for rs in seeds:
+    for i in range(num_trials):
+    #for rs in seeds:
+        """
         for exp in exps:
             for n in num:
             
                 lr = n * (1./(10 ** exp))
                 subprocess.call(["./tune_hyper.sh", str(lr), str(rs), exp_i])
+        """
+        lr = np.random.normal(2e-4, 1e-5)
+        subprocess.call(["./tune_hyper.sh", str(lr), '4911', exp_i])
