@@ -10,13 +10,17 @@ My implementation uses a stochastic decoding policy in the pointer network, real
 
 Currently, there is support for a sorting task and the Planar Symmetric Euclidean TSP.
 
+See `main.sh` for an example of how to write a bash script to easily set the run parameters.
+
+Examples: 
+
 To run `sort_10`:
     
-    ./trainer.py --task sort_10 --beam_size 3 --dropout 0.1 --random_seed 1234 --run_name sort_10-dropout-0.1-seed-1234
+    ./trainer.py --task sort_10 --beam_size 1 --random_seed 1234 --run_name sort_10-seed-1234
 
 To run `tsp_50`:
 
-    ./trainer.py --task tsp_50 --beam_size 10 --dropout 0.3 --random_seed 1234 --run_name tsp_50-dropout-0.3-seed-1234 
+    ./trainer.py --task tsp_50 --beam_size 1 --random_seed 1234 --run_name tsp_50-seed-1234 
 
 To load a saved model trained on `sort_10` and test on `sort_15`:
 
@@ -24,9 +28,9 @@ To load a saved model trained on `sort_10` and test on `sort_15`:
 
 To load a saved model and view the pointer network's attention layer:
 
-    ./trainer.py --task sort_15 --beam_size 3 --max_decoder_len 15 --load_path outputs/sort_10/24601-dropout-0.1/epoch-3.pt --run_name 24601-sort_15-attend --is_train False --disable_tensorboard True --plot_attention True
+    ./trainer.py --task sort_15 --beam_size 1 --max_decoder_len 15 --load_path outputs/sort_10/24601/epoch-3.pt --run_name 24601-sort_15-attend --is_train False --disable_tensorboard True --plot_attention True
 
-Please, feel free to notify me if you encounter any errors, or if you'd like to submit a pull request to add more features to this implementation.
+Please, feel free to notify me if you encounter any errors, or if you'd like to submit a pull request to improve this implementation.
 
 ## Adding other tasks
 
