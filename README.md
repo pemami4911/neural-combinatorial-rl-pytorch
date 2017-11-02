@@ -14,6 +14,12 @@ Currently, there is support for a sorting task and the Planar Symmetric Euclidea
 
 See `main.sh` for an example of how to write a bash script to easily set the run parameters.
 
+## TODO
+
+* [ ] Finish implementing beam search decoding to support > 1 beam
+* [ ] Add support for variable length inputs
+* [ ] Distributed implementation
+
 Examples: 
 
 To run `sort_10`:
