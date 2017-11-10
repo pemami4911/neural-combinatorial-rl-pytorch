@@ -120,15 +120,17 @@ class Decoder(nn.Module):
             mask = torch.zeros(logits.size()).byte()
             if self.use_cuda:
                 mask = mask.cuda()
+    
+        maskk = mask.clone()
 
         # to prevent them from being reselected. 
         # Or, allow re-selection and penalize in the objective function
         if prev_idxs is not None:
             # set most recently selected idx values to 1
-            mask[[x for x in range(logits.size(0))],
+            maskk[[x for x in range(logits.size(0))],
                     prev_idxs.data] = 1
-            logits[mask] = -np.inf
-        return logits, mask
+            logits[maskk] = -np.inf
+        return logits, maskk
 
     def forward(self, decoder_input, embedded_inputs, hidden, context):
         """

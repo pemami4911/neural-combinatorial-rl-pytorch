@@ -1,6 +1,6 @@
 #!/bin/bash
 
-TASK='tsp_20'
+TASK='tsp_50'
 BEAM_SIZE=1
 EMBEDDING_DIM=128
 HIDDEN_DIM=128
