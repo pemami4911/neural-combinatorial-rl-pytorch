@@ -2,15 +2,23 @@
 
 **WORK IN PROGRESS**
 
+**UPDATE 10/30/17** Was unable to get the RL pretraining model with greedy decoding to learn on the TSP10 or TSP20 environments. I tried a critic network as well as an exponential moving average baseline. I am using 1 NVIDIA GTX 1080 and trained for 1-2 days. It appears as if the variance of the actor loss is still too high, even with these baselines. Please create an Issue and let me know if you get this to work.
+
 PyTorch implementation of [Neural Combinatorial Optimization with Reinforcement Learning](https://arxiv.org/abs/1611.09940). 
 
-So far, I have implemented the basic RL pretraining model from the paper. An implementation of the supervised learning baseline model is available [here](https://github.com/pemami4911/neural-combinatorial-rl-tensorflow). 
+I have implemented the basic RL pretraining model from the paper. An implementation of the supervised learning baseline model is available [here](https://github.com/pemami4911/neural-combinatorial-rl-tensorflow). 
 
 My implementation uses a stochastic decoding policy in the pointer network, realized via PyTorch's `torch.multinomial()`, during training, and beam search (not yet finished, only supports 1 beam a.k.a. greedy) for decoding when testing the model. I have tried to use the same hyperparameters as mentioned in the paper but have not yet been able to replicate results from TSP. 
 
 Currently, there is support for a sorting task and the Planar Symmetric Euclidean TSP.
 
 See `main.sh` for an example of how to write a bash script to easily set the run parameters.
+
+## TODO
+
+* [ ] Finish implementing beam search decoding to support > 1 beam
+* [ ] Add support for variable length inputs
+* [ ] Distributed implementation
 
 Examples: 
 
