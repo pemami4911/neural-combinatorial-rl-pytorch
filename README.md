@@ -1,42 +1,18 @@
 # neural-combinatorial-rl-pytorch
 
-**WORK IN PROGRESS**
-
-**UPDATE 10/30/17** Was unable to get the RL pretraining model with greedy decoding to learn on the TSP10 or TSP20 environments. I tried a critic network as well as an exponential moving average baseline. I am using 1 NVIDIA GTX 1080 and trained for 1-2 days. It appears as if the variance of the actor loss is still too high, even with these baselines. Please create an Issue and let me know if you get this to work.
-
 PyTorch implementation of [Neural Combinatorial Optimization with Reinforcement Learning](https://arxiv.org/abs/1611.09940). 
 
-I have implemented the basic RL pretraining model from the paper. An implementation of the supervised learning baseline model is available [here](https://github.com/pemami4911/neural-combinatorial-rl-tensorflow). 
+I have implemented the basic RL pretraining model with greedy decoding from the paper. An implementation of the supervised learning baseline model is available [here](https://github.com/pemami4911/neural-combinatorial-rl-tensorflow). Instead of a critic network, I got my results below on TSP from using an exponential moving average critic. The critic network is simply commented out in my code right now. From correspondence with a few others, it was determined that the exponential moving average critic significantly helped improve results. 
 
-My implementation uses a stochastic decoding policy in the pointer network, realized via PyTorch's `torch.multinomial()`, during training, and beam search (not yet finished, only supports 1 beam a.k.a. greedy) for decoding when testing the model. I have tried to use the same hyperparameters as mentioned in the paper but have not yet been able to replicate results from TSP. 
+My implementation uses a stochastic decoding policy in the pointer network, realized via PyTorch's `torch.multinomial()`, during training, and beam search (**not yet finished**, only supports 1 beam a.k.a. greedy) for decoding when testing the model. 
 
-Currently, there is support for a sorting task and the Planar Symmetric Euclidean TSP.
+Currently, there is support for a sorting task and the planar symmetric Euclidean TSP.
 
-See `main.sh` for an example of how to write a bash script to easily set the run parameters.
+See `main.sh` for an example of how to run the code.
 
-## TODO
+Use the `--load_path $LOAD_PATH` and `--is_train False` flags to load a saved model.
 
-* [ ] Finish implementing beam search decoding to support > 1 beam
-* [ ] Add support for variable length inputs
-* [ ] Distributed implementation
-
-Examples: 
-
-To run `sort_10`:
-    
-    ./trainer.py --task sort_10 --beam_size 1 --random_seed 1234 --run_name sort_10-seed-1234
-
-To run `tsp_50`:
-
-    ./trainer.py --task tsp_50 --beam_size 1 --random_seed 1234 --run_name tsp_50-seed-1234 
-
-To load a saved model trained on `sort_10` and test on `sort_15`:
-
-    ./trainer.py --task --beam_size 3 sort_15 --max_decoder_len 15 --load_path outputs/sort_10/24601-dropout-0.1/epoch-3.pt --run_name 24601-sort15-epoch-3 --is_train False
-
-To load a saved model and view the pointer network's attention layer:
-
-    ./trainer.py --task sort_15 --beam_size 1 --max_decoder_len 15 --load_path outputs/sort_10/24601/epoch-3.pt --run_name 24601-sort_15-attend --is_train False --disable_tensorboard True --plot_attention True
+To load a saved model and view the pointer network's attention layer, also use the `--plot_attention True` flag.
 
 Please, feel free to notify me if you encounter any errors, or if you'd like to submit a pull request to improve this implementation.
 
@@ -52,7 +28,16 @@ This implementation can be extended to support other combinatorial optimization 
 * matplotlib
 * [tensorboard_logger](https://github.com/TeamHG-Memex/tensorboard_logger)
 
-## Results
+## TSP Results
+
+Results for 1 random seed over 50 epochs (each epoch is 10,000 batches of size 128). After each epoch, I validated performance on 1000 held out graphs. I used the same hyperparameters from the paper, as can be seen in `main.sh`. The dashed line shows the value indicated in Table 2 of Bello, et. al for comparison. The log scale x axis for the training reward is used to show how the tour length drops early on.
+
+![TSP 20 Train](img/tsp_20_train_reward.png)
+![TSP 20 Val](img/tsp_20_val_reward.png)
+![TSP 50 Train](img/tsp_50_train_reward.png)
+![TSP 50 Val](img/tsp_50_val_reward.png)
+
+## Sort Results
 
 I trained a model on `sort10` for 4 epochs of 1,000,000 randomly generated samples. I tested it on a dataset of size 10,000. Then, I tested the same model on `sort15` and `sort20` to test the generalization capabilities.
 
@@ -76,39 +61,17 @@ output: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 Plot the pointer network's attention layer with the argument `--plot_attention True`
 
-Examples: 
-
-`sort10`: 
-
-![sort10-0](/img/sort10-0.png)
-
-![sort10-1](/img/sort10-1.png)
-
-During greedy decoding, after making a selection, the logits for that index for the input is set to 0 for the rest of the decoding process.
-
-`sort15`:
-
-![sort15-0](img/sort15-0.png)
-
-![sort15-1](img/sort15-1.png)
-
-`sort20`:
-
-![sort20-0](img/sort20-0.png)
-
-Zoomed in slightly. Notice how the network doesn't really know how to handle higher numbers it wasn't trained on! But, it understands that they belong closer to the end of the output sequence.
-
-![sort20-1](img/sort20-1.png)
-
 ## TODO
 
-* [ ] Add RL pretraiing-Sampling
+* [ ] Add RL pretraining-Sampling
 * [ ] Add RL pretraining-Active Search
 * [ ] Active Search
 * [ ] Asynchronous training a la A3C
-* [ ] Refactor `USE_CUDA` variable
+* [X] Refactor `USE_CUDA` variable
+* [ ] Finish implementing beam search decoding to support > 1 beam
+* [ ] Add support for variable length inputs
 
 ## Acknowledgements
 
-Special thanks to the repos [devsisters/neural-combinatorial-rl-tensorflow](https://github.com/devsisters/neural-combinatorial-rl-tensorflow) and [MaximumEntropy/Seq2Seq-PyTorch](https://github.com/MaximumEntropy/Seq2Seq-PyTorch) for getting me started. 
+Special thanks to the repos [devsisters/neural-combinatorial-rl-tensorflow](https://github.com/devsisters/neural-combinatorial-rl-tensorflow) and [MaximumEntropy/Seq2Seq-PyTorch](https://github.com/MaximumEntropy/Seq2Seq-PyTorch) for getting me started, and @ricgama for figuring out that weird bug with `clone()`
 
