@@ -53,7 +53,7 @@ def reward(sample_solution, USE_CUDA=False):
         # if, for any, current > longest, update longest
         mask = torch.gt(current, longest)
         longest[mask] = current[mask]
-    return torch.div(longest, sourceL)
+    return -torch.div(longest, sourceL)
 
 def create_dataset(
         train_size,
@@ -125,7 +125,8 @@ class SortingDataset(Dataset):
 
     def __init__(self, dataset_fname):
         super(SortingDataset, self).__init__()
-        
+       
+        print('Loading training data into memory')
         self.data_set = []
         with open(dataset_fname, 'r') as dset:
             lines = dset.readlines()
