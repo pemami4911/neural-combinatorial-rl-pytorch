@@ -278,7 +278,7 @@ for i in range(epoch, epoch + int(args['n_epochs'])):
     # Use beam search decoding for validation
     model.actor_net.decoder.decode_type = "beam_search"
     
-    print('\n~Validating with beam search decoding~\n')
+    print('\n~Validating~\n')
 
     example_input = []
     example_output = []
@@ -331,9 +331,18 @@ for i in range(epoch, epoch + int(args['n_epochs'])):
      
         torch.save(model, os.path.join(save_dir, 'epoch-{}.pt'.format(i)))
 
+        # If the task requires generating new data after each epoch, do that here!
         if COP == 'tsp':
-            print('Generating and loading new TSP training set')
             training_dataset = tsp_task.TSPDataset(train=True, size=size,
                 num_samples=int(args['train_size']))
             training_dataloader = DataLoader(training_dataset, batch_size=int(args['batch_size']),
                 shuffle=True, num_workers=1)
+        if COP == 'sort':
+            train_fname, _ = sorting_task.create_dataset(
+                int(args['train_size']),
+                int(args['val_size']),
+                data_dir,
+                data_len=size)
+            training_dataset = sorting_task.SortingDataset(train_fname)
+            training_dataloader = DataLoader(training_dataset, batch_size=int(args['batch_size']),
+                    shuffle=True, num_workers=1)
