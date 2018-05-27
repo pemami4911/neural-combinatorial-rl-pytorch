@@ -113,7 +113,7 @@ class Decoder(nn.Module):
 
         self.pointer = Attention(hidden_dim, use_tanh=use_tanh, C=tanh_exploration, use_cuda=self.use_cuda)
         self.glimpse = Attention(hidden_dim, use_tanh=False, use_cuda=self.use_cuda)
-        self.sm = nn.Softmax()
+        self.sm = nn.Softmax(dim=-1)
 
     def apply_mask_to_logits(self, step, logits, mask, prev_idxs):    
         if mask is None:
@@ -250,7 +250,9 @@ class Decoder(nn.Module):
         """
         batch_size = probs.size(0)
         # idxs is [batch_size]
-        idxs = probs.multinomial().squeeze(1)
+        # idxs = probs.multinomial().squeeze(1)
+        c = torch.distributions.Categorical(probs)
+        idxs = c.sample()
 
         # due to race conditions, might need to resample here
         for old_idxs in selections:
@@ -282,7 +284,7 @@ class Decoder(nn.Module):
             hyps = zip(*[beam[b].get_hyp(k) for k in ks[:n_best]])
             all_hyp += [hyps]
         
-        all_idxs = Variable(torch.LongTensor([[x for x in hyp] for hyp in all_hyp]).squeeze())
+        all_idxs = Variable(torch.LongTensor([[x for x in hyp] for hyp in all_hyp]).squeeze().unsqueeze(0))
       
         if all_idxs.dim() == 2:
             if all_idxs.size(1) > n_best:
@@ -395,7 +397,7 @@ class CriticNetwork(nn.Module):
         
         self.process_block = Attention(hidden_dim,
                 use_tanh=use_tanh, C=tanh_exploration, use_cuda=use_cuda)
-        self.sm = nn.Softmax()
+        self.sm = nn.Softmax(dim=-1)
         self.decoder = nn.Sequential(
                 nn.Linear(hidden_dim, hidden_dim),
                 nn.ReLU(),
