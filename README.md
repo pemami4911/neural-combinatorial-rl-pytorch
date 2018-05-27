@@ -23,7 +23,7 @@ This implementation can be extended to support other combinatorial optimization 
 ## Dependencies
 
 * Python=3.6 (should be OK with v >= 3.4)
-* PyTorch=0.2
+* PyTorch=0.4.0
 * tqdm
 * matplotlib
 * [tensorboard_logger](https://github.com/TeamHG-Memex/tensorboard_logger)
