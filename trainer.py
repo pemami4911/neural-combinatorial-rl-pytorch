@@ -219,9 +219,9 @@ for i in range(epoch, epoch + int(args['n_epochs'])):
                 logprobs += logprob
            
             # guard against nan
-            nll[nll != nll] = 0.
+            nll[(nll != nll).detach()] = 0.
             # clamp any -inf's to 0 to throw away this tour
-            logprobs[logprobs < -1000] = 0.
+            logprobs[(logprobs < -1000).detach()] = 0.
 
             # multiply each time step by the advanrate
             reinforce = advantage * logprobs
