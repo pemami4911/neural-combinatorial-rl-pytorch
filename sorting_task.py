@@ -35,8 +35,8 @@ def reward(sample_solution, USE_CUDA=False):
     batch_size = sample_solution[0].size(0)
     sourceL = len(sample_solution)
 
-    longest = Variable(torch.ones(batch_size), requires_grad=False)
-    current = Variable(torch.ones(batch_size), requires_grad=False)
+    longest = Variable(torch.ones(batch_size, 1), requires_grad=False)
+    current = Variable(torch.ones(batch_size, 1), requires_grad=False)
 
     if USE_CUDA:
         longest = longest.cuda()
