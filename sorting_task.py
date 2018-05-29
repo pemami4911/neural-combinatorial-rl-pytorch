@@ -46,7 +46,7 @@ def reward(sample_solution, USE_CUDA=False):
         # compare solution[i-1] < solution[i] 
         res = torch.lt(sample_solution[i-1], sample_solution[i]) 
         # if res[i,j] == 1, increment length of current sorted subsequence
-        current += res.float()  
+        current += res.float()
         # else, reset current to 1
         current[torch.eq(res, 0)] = 1
         #current[torch.eq(res, 0)] -= 1
@@ -94,7 +94,7 @@ def create_dataset(
         line = ''
         for j in range(data_len-1):
             line += '{} '.format(tensor[j])
-        line += str(tensor[-1]) + '\n'
+        line += str(tensor[-1].item()) + '\n'
         return line
     
     print('Creating training data set for {}...'.format(train_task))
