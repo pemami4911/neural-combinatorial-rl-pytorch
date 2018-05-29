@@ -28,6 +28,8 @@ This implementation can be extended to support other combinatorial optimization 
 * matplotlib
 * [tensorboard_logger](https://github.com/TeamHG-Memex/tensorboard_logger)
 
+PyTorch 0.4 compatibility is available on branch `pytorch-0.4`.
+
 ## TSP Results
 
 Results for 1 random seed over 50 epochs (each epoch is 10,000 batches of size 128). After each epoch, I validated performance on 1000 held out graphs. I used the same hyperparameters from the paper, as can be seen in `main.sh`. The dashed line shows the value indicated in Table 2 of Bello, et. al for comparison. The log scale x axis for the training reward is used to show how the tour length drops early on.
